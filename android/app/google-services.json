@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "93986217590",
+    "firebase_url": "https://uyari-f25c4-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "uyari-f25c4",
+    "storage_bucket": "uyari-f25c4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:93986217590:android:721a15dc810e3f5a92c957",
+        "android_client_info": {
+          "package_name": "com.uzakdur.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2ekoI-oHqM2jPWjPJp6uUCxJXCydqIuE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
