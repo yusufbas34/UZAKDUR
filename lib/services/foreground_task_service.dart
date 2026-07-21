@@ -18,6 +18,23 @@ class _ProximityHandler extends TaskHandler {
   int _tick = 0;
   final _battery = Battery();
 
+  // Uzaktayken her 5sn'de bir Firebase'den tüm eşleşmeleri + partner
+  // konumlarını çekmek gereksiz pil/veri tüketir. En son bilinen mesafe/eşik
+  // oranına göre bu tam kontrolü seyrekleştiriyoruz: eşiğe yakınken (veya
+  // henüz bilinmiyorken) her tick'te, orta mesafede ~10sn'de, uzaktayken
+  // ~30sn'de bir. Kalp atışı (heartbeat) her zaman her tick'te gönderilir ki
+  // admin panelinde "çevrimdışı" görünmesin.
+  double? _lastMinRatio;
+
+  bool _shouldFullCheck() {
+    if (_alarming) return true; // alarm aktifken her zaman tam kontrol (yasak bölge çıkışı da dahil)
+    final ratio = _lastMinRatio;
+    if (ratio == null) return true;
+    if (ratio < 1.3) return true;
+    if (ratio < 2.5) return _tick % 2 == 0;
+    return _tick % 6 == 0;
+  }
+
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
     _deviceId = await FlutterForegroundTask.getData<String>(key: 'deviceId') ?? '';
@@ -41,6 +58,7 @@ class _ProximityHandler extends TaskHandler {
       try { await LocationService.writeBattery(_deviceId, await _battery.batteryLevel); } catch (_) {}
     }
     if (_myLat == null || _myLon == null) return;
+    if (!_shouldFullCheck()) return;
     try {
       final deviceSnap = await FirebaseDatabase.instance.ref('devices/$_deviceId').get();
       final deviceMap = deviceSnap.value as Map?;
@@ -58,6 +76,7 @@ class _ProximityHandler extends TaskHandler {
       double? alarmDistance;
       String? alarmSoundId;
       bool anyAlarm = false;
+      double? minRatio;
 
       for (final entry in pairsMap.entries) {
         final pairId = entry.key as String;
@@ -85,6 +104,11 @@ class _ProximityHandler extends TaskHandler {
           d = LocationService.calculateDistance(_myLat!, _myLon!, other.lat, other.lon);
         }
 
+        if (d != null && pair.threshold > 0) {
+          final ratio = d / pair.threshold;
+          if (minRatio == null || ratio < minRatio) minRatio = ratio;
+        }
+
         final proximityAlarm = d != null && d < pair.threshold;
         final isAlarm = proximityAlarm || breachedZone != null;
 
@@ -100,6 +124,7 @@ class _ProximityHandler extends TaskHandler {
           }
         }
       }
+      _lastMinRatio = minRatio;
 
       sendPort?.send({'type': 'distance', 'value': alarmDistance});
 

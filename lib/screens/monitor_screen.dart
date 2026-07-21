@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../models/roles.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
@@ -121,6 +122,35 @@ class _MonitorScreenState extends State<MonitorScreen>
     setState(() => _disguised = next);
   }
 
+  // Android'in standart pil optimizasyonu izni bazı üreticilerde (Xiaomi/MIUI,
+  // Huawei, Oppo/Realme, Vivo vb.) yeterli olmuyor; bu üreticiler uygulamayı
+  // arka planda tamamen öldürebiliyor. Bunun tek gerçek düzeltmesi kullanıcının
+  // kendi telefon ayarlarından "Otomatik Başlatma" ve "Pil kısıtlaması yok"
+  // seçeneklerini elle açması — hiçbir genel Android API'si bunu programatik
+  // olarak açtırtamıyor. Bu yüzden bir kez bilgilendirme gösteriyoruz.
+  Future<void> _maybeShowBatteryDialog() async {
+    final p = await SharedPreferences.getInstance();
+    if (p.getBool('battery_dialog_shown') ?? false) return;
+    await p.setBool('battery_dialog_shown', true);
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Arka Planda Çalışma', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        content: Text(
+          'Bazı telefonlarda (Xiaomi/MIUI, Huawei, Oppo, Vivo gibi) Android\'in pil izni yeterli olmuyor ve uygulama kapatıldığında/arka plana atıldığında sistem konum takibini durdurabiliyor.\n\n'
+          'Kesintisiz çalışması için telefonunun Ayarlar > Pil > Uygulama pil kullanımı bölümünden UZAKDUR için "Kısıtlama Yok" seç ve varsa "Otomatik Başlatma" iznini aç.',
+          style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Tamam', style: GoogleFonts.inter(color: AppColors.textMuted))),
+          TextButton(onPressed: () { Navigator.pop(ctx); openAppSettings(); }, child: Text('Ayarları Aç', style: GoogleFonts.inter(color: AppColors.danger, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+  }
+
   Future<void> _start() async {
     setState(() { _errorText = null; _statusText = 'Konum izni kontrol ediliyor…'; });
     final result = await LocationService.requestPermissions();
@@ -135,6 +165,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     await LocationService.setOnline(widget.deviceId, true);
     _reportBattery();
     _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _reportBattery());
+    _maybeShowBatteryDialog();
 
     _pairsSub = LocationService.listenPairsForDevice(widget.deviceId, _handlePairsUpdate);
 
