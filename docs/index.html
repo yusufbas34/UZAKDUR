@@ -309,18 +309,18 @@ async function fetchJSON(path) {
     clearTimeout(timeout);
   }
 }
-async function patchJSON(path, data) {
-  await fetch(`${DB_URL}/${path}.json`, { method: 'PATCH', body: JSON.stringify(data) });
+async function writeRequest(path, method, data) {
+  const r = await fetch(`${DB_URL}/${path}.json`, { method, body: data !== undefined ? JSON.stringify(data) : undefined });
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error(`Kaydedilemedi (${method} ${path}): HTTP ${r.status} — ${body || r.statusText}`);
+  }
+  return r;
 }
-async function putJSON(path, data) {
-  await fetch(`${DB_URL}/${path}.json`, { method: 'PUT', body: JSON.stringify(data) });
-}
-async function deletePath(path) {
-  await fetch(`${DB_URL}/${path}.json`, { method: 'DELETE' });
-}
-async function pushJSON(path, data) {
-  await fetch(`${DB_URL}/${path}.json`, { method: 'POST', body: JSON.stringify(data) });
-}
+async function patchJSON(path, data) { return writeRequest(path, 'PATCH', data); }
+async function putJSON(path, data) { return writeRequest(path, 'PUT', data); }
+async function deletePath(path) { return writeRequest(path, 'DELETE'); }
+async function pushJSON(path, data) { return writeRequest(path, 'POST', data); }
 function logEvent(pairId, type, extra) {
   return pushJSON(`alarm_log/${pairId}`, Object.assign({ byDeviceId: 'admin', distance: 0, type, ts: Date.now() }, extra || {}));
 }
