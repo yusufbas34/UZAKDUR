@@ -306,7 +306,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               alignment: Alignment.center,
               child: _saving
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text('Kaydol ve Başla', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                  : Text('Devam Et', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
             ),
           ),
         ),
