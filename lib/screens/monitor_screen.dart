@@ -34,11 +34,29 @@ class MonitorScreen extends StatefulWidget {
 
 class _MonitorScreenState extends State<MonitorScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  String? _pairId;
-  PairData? _pair;
-  LocationData? _myLocation, _otherLocation;
+  // Bir cihaz aynı anda birden fazla eşleşmede yer alabilir (ör. 1 korunan
+  // – 2..4 uzaklaştırılan). Her eşleşme pairId'siyle ayrı takip edilir;
+  // harita/ayarlar ekranı ise her an "odaklanılan" tek bir eşleşmeyi gösterir.
+  Map<String, PairData> _pairs = {};
+  Map<String, LocationData> _otherLocByPair = {};
+  Map<String, bool> _otherOnlineByPair = {};
+  Map<String, String> _otherNameByPair = {};
+  Map<String, String> _pairStatus = {}; // pairId -> 'alarm' | 'caution' | 'safe' | 'unknown'
+  final Map<String, StreamSubscription> _otherLocSubs = {};
+  final Map<String, StreamSubscription> _otherOnlineSubs = {};
+  final Map<String, StreamSubscription> _otherNameSubs = {};
+  StreamSubscription? _pairsSub;
+  String? _focusedPairId;
+  bool _fgStarted = false;
+
+  PairData? get _pair => _focusedPairId != null ? _pairs[_focusedPairId] : null;
+  LocationData? get _otherLocation => _focusedPairId != null ? _otherLocByPair[_focusedPairId] : null;
+  bool get _otherOnline => _focusedPairId != null ? (_otherOnlineByPair[_focusedPairId] ?? false) : false;
+  String? get _otherName => _focusedPairId != null ? _otherNameByPair[_focusedPairId] : null;
+
+  LocationData? _myLocation;
   double? _distance;
-  bool _isAlarm = false, _isRunning = false, _otherOnline = false, _wasCaution = false;
+  bool _isAlarm = false, _isRunning = false, _wasCaution = false;
   String _statusText = 'GPS bekleniyor…';
   String? _alarmZoneLabel;
   String? _errorText;
@@ -49,7 +67,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   final _battery = Battery();
 
   StreamSubscription<Position>? _posSub;
-  StreamSubscription? _deviceSub, _pairSub, _otherLocSub, _otherOnlineSub;
   Timer? _pollTimer, _batteryTimer;
 
   late AnimationController _alarmCtrl;
@@ -119,7 +136,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     _reportBattery();
     _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _reportBattery());
 
-    _deviceSub = LocationService.listenDevice(widget.deviceId, _handleDeviceUpdate);
+    _pairsSub = LocationService.listenPairsForDevice(widget.deviceId, _handlePairsUpdate);
 
     _posSub = LocationService.startLocationStream().listen((pos) async {
       final loc = LocationData(lat: pos.latitude, lon: pos.longitude, timestamp: DateTime.now());
@@ -143,127 +160,176 @@ class _MonitorScreenState extends State<MonitorScreen>
     } catch (_) {}
   }
 
-  void _handleDeviceUpdate(Map<dynamic, dynamic>? data) {
-    final newPairId = data?['pairId'] as String?;
-    if (newPairId == _pairId) return;
-    _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel();
-    _pairId = newPairId;
-    if (!mounted) return;
-    setState(() { _pair = null; _otherLocation = null; _otherOnline = false; });
-    if (newPairId == null) {
-      ForegroundTaskService.stop().ignore();
-      return;
-    }
-    bool subscribedOther = false;
-    _pairSub = LocationService.listenPair(newPairId, (pair) {
-      if (!mounted) return;
-      setState(() => _pair = pair);
-      if (!subscribedOther) {
-        subscribedOther = true;
-        final otherId = pair.otherDeviceId(widget.deviceId);
-        _otherLocSub = LocationService.listenOtherLocation(otherId, (loc) {
-          if (!mounted) return;
-          setState(() => _otherLocation = loc);
-          _updateMap();
-          _checkDistance();
-        });
-        _otherOnlineSub = LocationService.listenOtherOnline(otherId, (online) {
-          if (!mounted) return;
-          setState(() => _otherOnline = online);
-        });
-        ForegroundTaskService.start(deviceId: widget.deviceId);
-      }
-      _checkDistance();
-      _updateMap();
-    });
-  }
+  void _handlePairsUpdate(Map<String, PairData> newPairs) {
+    final oldIds = _pairs.keys.toSet();
+    final newIds = newPairs.keys.toSet();
 
-  ZoneData? _breachedZone() {
-    if (_isProtected || _myLocation == null || _pair == null) return null;
-    for (final z in _pair!.zones) {
-      final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, z.lat, z.lon);
-      if (d < z.radius) return z;
+    for (final removedId in oldIds.difference(newIds)) {
+      _otherLocSubs.remove(removedId)?.cancel();
+      _otherOnlineSubs.remove(removedId)?.cancel();
+      _otherNameSubs.remove(removedId)?.cancel();
+      _otherLocByPair.remove(removedId);
+      _otherOnlineByPair.remove(removedId);
+      _otherNameByPair.remove(removedId);
+      _pairStatus.remove(removedId);
     }
-    return null;
+
+    for (final addedId in newIds.difference(oldIds)) {
+      final pair = newPairs[addedId]!;
+      final otherId = pair.otherDeviceId(widget.deviceId);
+      _otherLocSubs[addedId] = LocationService.listenOtherLocation(otherId, (loc) {
+        if (!mounted) return;
+        setState(() => _otherLocByPair[addedId] = loc);
+        _checkDistance();
+        _updateMap();
+      });
+      _otherOnlineSubs[addedId] = LocationService.listenOtherOnline(otherId, (online) {
+        if (!mounted) return;
+        setState(() => _otherOnlineByPair[addedId] = online);
+      });
+      _otherNameSubs[addedId] = LocationService.listenDevice(otherId, (data) {
+        if (!mounted) return;
+        setState(() => _otherNameByPair[addedId] = (data?['name'] as String?) ?? 'Cihaz');
+      });
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _pairs = newPairs;
+      if (_focusedPairId == null || !_pairs.containsKey(_focusedPairId)) {
+        _focusedPairId = _pairs.keys.isNotEmpty ? _pairs.keys.first : null;
+      }
+    });
+
+    if (_pairs.isNotEmpty && !_fgStarted) {
+      _fgStarted = true;
+      ForegroundTaskService.start(deviceId: widget.deviceId);
+    } else if (_pairs.isEmpty && _fgStarted) {
+      _fgStarted = false;
+      ForegroundTaskService.stop().ignore();
+    }
+
+    _checkDistance();
+    _updateMap();
   }
 
   void _checkDistance() {
-    if (_pair == null) return;
-    final zone = _breachedZone();
-    double? d;
-    bool proximityAlarm = false;
-    bool caution = false;
-    if (_myLocation != null && _otherLocation != null) {
-      final threshold = _pair!.threshold;
-      d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, _otherLocation!.lat, _otherLocation!.lon);
-      proximityAlarm = d < threshold;
-      caution = !proximityAlarm && d < threshold * 1.5;
+    if (_pairs.isEmpty) return;
+    String? alarmPairId;
+    ZoneData? alarmZone;
+    double? alarmDistance;
+    String? alarmSoundId;
+    bool anyCaution = false;
+    final newStatus = <String, String>{};
+
+    for (final entry in _pairs.entries) {
+      final pid = entry.key;
+      final pair = entry.value;
+      final otherLoc = _otherLocByPair[pid];
+
+      ZoneData? zone;
+      if (!_isProtected && _myLocation != null) {
+        for (final z in pair.zones) {
+          final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, z.lat, z.lon);
+          if (d < z.radius) { zone = z; break; }
+        }
+      }
+
+      double? d;
+      bool proximityAlarm = false;
+      bool caution = false;
+      if (_myLocation != null && otherLoc != null) {
+        d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, otherLoc.lat, otherLoc.lon);
+        proximityAlarm = d < pair.threshold;
+        caution = !proximityAlarm && d < pair.threshold * 1.5;
+      }
+      if (caution) anyCaution = true;
+
+      final isAlarm = proximityAlarm || zone != null;
+      newStatus[pid] = isAlarm ? 'alarm' : (caution ? 'caution' : (d != null ? 'safe' : 'unknown'));
+
+      if (isAlarm) {
+        if (zone != null) {
+          LocationService.writeAlarmLog(pid, widget.deviceId, 0, type: 'zone', zoneLabel: zone.label);
+        } else if (d != null) {
+          LocationService.writeAlarmLog(pid, widget.deviceId, d);
+        }
+        alarmPairId ??= pid;
+        alarmZone ??= zone;
+        alarmDistance ??= d;
+        alarmSoundId ??= pair.alarmSound;
+      }
     }
-    final isAlarm = proximityAlarm || zone != null;
+
+    final isAlarm = alarmPairId != null;
     final now = _fmt.format(DateTime.now());
     if (!mounted) return;
     setState(() {
-      _distance = d;
+      _pairStatus = newStatus;
+      if (isAlarm && _focusedPairId != alarmPairId) {
+        _focusedPairId = alarmPairId;
+      }
+      final focusedOtherLoc = _otherLocation;
+      _distance = (_myLocation != null && focusedOtherLoc != null)
+          ? LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, focusedOtherLoc.lat, focusedOtherLoc.lon)
+          : null;
       _isAlarm = isAlarm;
-      _alarmZoneLabel = zone?.label;
-      _statusText = zone != null
-          ? 'Yasak bölgede: ${zone.label}'
-          : proximityAlarm
-              ? 'Yaklaşma tespit edildi!'
-              : caution
-                  ? 'Dikkat — Sınıra yaklaşıyor'
-                  : 'Güvenli mesafede';
-      if (d != null && (_log.isEmpty || _log.first.isAlarm != isAlarm)) {
-        _log.insert(0, LogEntry(now, d, isAlarm));
+      _alarmZoneLabel = isAlarm ? alarmZone?.label : null;
+      _statusText = isAlarm
+          ? (alarmZone != null ? 'Yasak bölgede: ${alarmZone.label}' : 'Yaklaşma tespit edildi!')
+          : anyCaution
+              ? 'Dikkat — Sınıra yaklaşıyor'
+              : 'Güvenli mesafede';
+      if (_distance != null && (_log.isEmpty || _log.first.isAlarm != isAlarm)) {
+        _log.insert(0, LogEntry(now, _distance!, isAlarm));
         if (_log.length > 100) _log.removeLast();
       }
     });
+
     if (isAlarm) {
       if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
-      NotificationService.startAlarm(d ?? 0, soundId: _pair!.alarmSound);
-      if (zone != null) {
-        LocationService.writeAlarmLog(_pairId!, widget.deviceId, 0, type: 'zone', zoneLabel: zone.label);
-      } else if (d != null) {
-        LocationService.writeAlarmLog(_pairId!, widget.deviceId, d);
-      }
+      NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
       _wasCaution = false;
     } else {
       _alarmCtrl.stop(); _alarmCtrl.reset();
       NotificationService.stopAlarm();
-      if (caution && !_wasCaution) {
+      if (anyCaution && !_wasCaution) {
         HapticFeedback.mediumImpact();
       }
-      _wasCaution = caution;
+      _wasCaution = anyCaution;
     }
+    _updateMap();
   }
 
   Future<void> _triggerPanic() async {
-    if (_pairId == null || _panicSending) return;
+    if (_pairs.isEmpty || _panicSending) return;
     setState(() => _panicSending = true);
     HapticFeedback.heavyImpact();
     try {
-      await LocationService.writeAlarmLog(_pairId!, widget.deviceId, 0, type: 'panic');
-      final contacts = _pair?.emergencyContacts ?? const [];
       final loc = _myLocation;
       final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
 
-      String emailsOf(bool authority) => contacts
-          .where((c) => (c.type == 'authority') == authority)
-          .map((c) => c.email)
-          .whereType<String>()
-          .where((e) => e.trim().isNotEmpty)
-          .join(',');
+      final familyEmails = <String>{};
+      final authorityEmails = <String>{};
+      for (final entry in _pairs.entries) {
+        final pid = entry.key;
+        final pair = entry.value;
+        await LocationService.writeAlarmLog(pid, widget.deviceId, 0, type: 'panic');
+        for (final c in pair.emergencyContacts) {
+          final email = c.email?.trim();
+          if (email == null || email.isEmpty) continue;
+          if (c.type == 'authority') { authorityEmails.add(email); } else { familyEmails.add(email); }
+        }
+      }
 
-      final familyEmails = emailsOf(false);
       if (familyEmails.isNotEmpty) {
-        final uri = Uri(scheme: 'mailto', path: familyEmails,
+        final uri = Uri(scheme: 'mailto', path: familyEmails.join(','),
             queryParameters: {'subject': 'ACİL — UZAKDUR Panik', 'body': '${widget.name} panik butonuna bastı.\nKonum: $locText'});
         if (await canLaunchUrl(uri)) await launchUrl(uri);
       }
 
-      final authorityEmails = emailsOf(true);
       if (authorityEmails.isNotEmpty) {
-        final uri = Uri(scheme: 'mailto', path: authorityEmails, queryParameters: {
+        final uri = Uri(scheme: 'mailto', path: authorityEmails.join(','), queryParameters: {
           'subject': 'ACİL YARDIM TALEBİ — UZAKDUR Panik Bildirimi',
           'body': 'Resmi bildirim: ${widget.name} isimli kişi, UZAKDUR uygulamasındaki acil durum butonuna basmıştır.\n\n'
               'Bildirim zamanı: ${DateTime.now()}\n'
@@ -308,7 +374,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         markerId: const MarkerId('other'),
         position: LatLng(_otherLocation!.lat, _otherLocation!.lon),
         icon: BitmapDescriptor.defaultMarkerWithHue(_isProtected ? BitmapDescriptor.hueRed : BitmapDescriptor.hueAzure),
-        infoWindow: const InfoWindow(title: 'Eşleşilen cihaz'), zIndex: 1,
+        infoWindow: InfoWindow(title: _otherName ?? 'Eşleşilen cihaz'), zIndex: 1,
       ));
     }
 
@@ -351,10 +417,17 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Future<void> _stop() async {
-    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel(); _batteryTimer?.cancel();
+    _posSub?.cancel();
+    _pairsSub?.cancel();
+    for (final s in _otherLocSubs.values) { s.cancel(); }
+    for (final s in _otherOnlineSubs.values) { s.cancel(); }
+    for (final s in _otherNameSubs.values) { s.cancel(); }
+    _otherLocSubs.clear(); _otherOnlineSubs.clear(); _otherNameSubs.clear();
+    _pollTimer?.cancel(); _batteryTimer?.cancel();
     _alarmCtrl.stop(); _alarmCtrl.reset();
     NotificationService.stopAlarm();
     ForegroundTaskService.stop().ignore();
+    _fgStarted = false;
     LocationService.setOnline(widget.deviceId, false).ignore();
     if (!mounted) return;
     setState(() { _isRunning = false; _isAlarm = false; _statusText = 'Durduruldu'; });
@@ -366,7 +439,8 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Future<void> _requestDistance() async {
-    if (_pairId == null || _pair == null) return;
+    if (_focusedPairId == null || _pair == null) return;
+    final pairId = _focusedPairId!;
     double value = _pair!.threshold;
     await showModalBottomSheet(
       context: context, backgroundColor: AppColors.surface,
@@ -385,7 +459,7 @@ class _MonitorScreenState extends State<MonitorScreen>
               onChanged: (v) => setSheet(() => value = v)),
           const SizedBox(height: 12),
           SizedBox(width: double.infinity, child: GestureDetector(
-            onTap: () async { await LocationService.requestDistanceChange(_pairId!, value); if (ctx.mounted) Navigator.pop(ctx); },
+            onTap: () async { await LocationService.requestDistanceChange(pairId, value); if (ctx.mounted) Navigator.pop(ctx); },
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(12)),
@@ -399,7 +473,8 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Future<void> _pickAlarmSound() async {
-    if (_pairId == null || _pair == null) return;
+    if (_focusedPairId == null || _pair == null) return;
+    final pairId = _focusedPairId!;
     await showModalBottomSheet(
       context: context, backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -413,7 +488,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                 leading: Icon(e.key == _pair!.alarmSound ? Icons.check_circle_rounded : Icons.circle_outlined,
                     color: e.key == _pair!.alarmSound ? AppColors.danger : AppColors.textDisabled),
                 title: Text(e.value, style: GoogleFonts.inter(color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
-                onTap: () async { await LocationService.setAlarmSound(_pairId!, e.key); if (ctx.mounted) Navigator.pop(ctx); },
+                onTap: () async { await LocationService.setAlarmSound(pairId, e.key); if (ctx.mounted) Navigator.pop(ctx); },
               )),
         ]),
       ),
@@ -428,7 +503,12 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel(); _batteryTimer?.cancel();
+    _posSub?.cancel();
+    _pairsSub?.cancel();
+    for (final s in _otherLocSubs.values) { s.cancel(); }
+    for (final s in _otherOnlineSubs.values) { s.cancel(); }
+    for (final s in _otherNameSubs.values) { s.cancel(); }
+    _pollTimer?.cancel(); _batteryTimer?.cancel();
     _alarmCtrl.dispose(); _mapCtrl?.dispose();
     NotificationService.stopAlarm().ignore();
     ForegroundTaskService.stop().ignore();
@@ -438,6 +518,15 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   Color get _roleColor => _isProtected ? AppColors.roleB : AppColors.roleA;
   Color get _statusColor => _isAlarm ? AppColors.danger : _distance != null && _pair != null && _distance! < _pair!.threshold * 1.5 ? AppColors.warning : AppColors.safe;
+
+  Color _statusColorFor(String? status) {
+    switch (status) {
+      case 'alarm': return AppColors.danger;
+      case 'caution': return AppColors.warning;
+      case 'safe': return AppColors.safe;
+      default: return AppColors.textDisabled;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -454,9 +543,10 @@ class _MonitorScreenState extends State<MonitorScreen>
             ),
             child: SafeArea(child: Column(children: [
               _buildTopBar(),
+              if (_pairs.isNotEmpty) _buildPartnerStrip(),
               Expanded(child: _errorText != null
                   ? _buildErrorState()
-                  : _pairId == null
+                  : _pairs.isEmpty
                       ? _buildWaitingState()
                       : Column(children: [_buildMap(), _buildStatusBar(), _buildBottom()])),
             ])),
@@ -480,7 +570,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         ]),
       ),
       const Spacer(),
-      if (_isProtected && _pairId != null) ...[
+      if (_isProtected && _pairs.isNotEmpty) ...[
         _IconBtn(icon: Icons.rule_rounded, onTap: _requestDistance),
         const SizedBox(width: 8),
         _IconBtn(icon: Icons.music_note_rounded, onTap: _pickAlarmSound),
@@ -491,11 +581,41 @@ class _MonitorScreenState extends State<MonitorScreen>
         const SizedBox(width: 10),
       ],
       _OnlineDot(label: 'Ben', online: _isRunning, color: _roleColor),
-      if (_pairId != null) ...[
-        const SizedBox(width: 10),
-        _OnlineDot(label: 'Karşı Taraf', online: _otherOnline, color: _isProtected ? AppColors.roleA : AppColors.roleB),
-      ],
     ]),
+  );
+
+  Widget _buildPartnerStrip() => Container(
+    height: 46,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border, width: 0.5))),
+    child: ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: _pairs.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 8),
+      itemBuilder: (_, i) {
+        final pid = _pairs.keys.elementAt(i);
+        final selected = pid == _focusedPairId;
+        final statusColor = _statusColorFor(_pairStatus[pid]);
+        final name = _otherNameByPair[pid] ?? 'Eşleşme ${i + 1}';
+        final online = _otherOnlineByPair[pid] ?? false;
+        return GestureDetector(
+          onTap: () => setState(() => _focusedPairId = pid),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: selected ? statusColor.withOpacity(0.12) : AppColors.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: selected ? statusColor.withOpacity(0.5) : AppColors.border),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: online ? statusColor : AppColors.textDisabled)),
+              const SizedBox(width: 7),
+              Text(name, style: GoogleFonts.inter(fontSize: 11.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: selected ? AppColors.textPrimary : AppColors.textSecondary)),
+            ]),
+          ),
+        );
+      },
+    ),
   );
 
   Widget _buildWaitingState() => Center(child: Padding(padding: const EdgeInsets.all(32), child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -504,7 +624,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     const SizedBox(height: 22),
     Text('Eşleştirme Bekleniyor', style: GoogleFonts.inter(fontSize: 19, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
     const SizedBox(height: 10),
-    Text('${widget.name} olarak kayıtlısın. Yönetici seni web panelinden bir cihazla eşleştirdiğinde izleme otomatik başlayacak.',
+    Text('${widget.name} olarak kayıtlısın. Yönetici seni web panelinden bir veya birden fazla cihazla eşleştirdiğinde izleme otomatik başlayacak.',
         textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary, height: 1.6)),
     const SizedBox(height: 20),
     Container(
@@ -538,7 +658,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         const SizedBox(height: 8),
         _MapBtn(icon: Icons.fit_screen_rounded, active: false, color: AppColors.textSecondary, onTap: () { setState(() => _mapFollowsMe = false); _updateMap(); }),
       ])),
-      if (_isProtected && _pairId != null) Positioned(bottom: 12, left: 12, child: _PanicButton(sending: _panicSending, onFire: _triggerPanic)),
+      if (_isProtected && _pairs.isNotEmpty) Positioned(bottom: 12, left: 12, child: _PanicButton(sending: _panicSending, onFire: _triggerPanic)),
       if (_isAlarm) Positioned(bottom: 0, left: 0, right: 0,
           child: AnimatedBuilder(animation: _alarmAnim, builder: (_, __) => Container(height: 3, color: AppColors.danger.withOpacity(0.5 + 0.5 * _alarmAnim.value)))),
     ]),

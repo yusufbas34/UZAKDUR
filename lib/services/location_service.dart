@@ -147,11 +147,26 @@ class LocationService {
       _db.child('devices/$otherDeviceId/online').onValue.listen((e) => onData(e.snapshot.value == true));
 
   // --- Pairing ---
-  static StreamSubscription<DatabaseEvent> listenPair(String pairId, void Function(PairData) onData) =>
-      _db.child('pairs/$pairId').onValue.listen((e) {
+  // Bir cihazın eşleşmeleri devices altında ayrı bir alanda tutulmaz; her
+  // zaman pairs koleksiyonunun tamamından süzülür, böylece kopya bir referans
+  // asla senkron dışı kalamaz. Bir cihaz aynı anda birden fazla eşleşmede
+  // (ör. 1 korunan – 2..4 uzaklaştırılan) yer alabilir.
+  static StreamSubscription<DatabaseEvent> listenPairsForDevice(
+          String deviceId, void Function(Map<String, PairData>) onData) =>
+      _db.child('pairs').onValue.listen((e) {
         final v = e.snapshot.value;
-        if (v == null) return;
-        try { onData(PairData.fromMap(pairId, v as Map)); } catch (_) {}
+        final result = <String, PairData>{};
+        if (v is Map) {
+          v.forEach((key, value) {
+            try {
+              final pd = PairData.fromMap(key as String, value as Map);
+              if (pd.protectedDeviceId == deviceId || pd.trackedDeviceId == deviceId) {
+                result[pd.id] = pd;
+              }
+            } catch (_) {}
+          });
+        }
+        onData(result);
       });
 
   static Future<void> requestDistanceChange(String pairId, double meters) =>

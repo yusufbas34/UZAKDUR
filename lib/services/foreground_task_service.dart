@@ -44,51 +44,78 @@ class _ProximityHandler extends TaskHandler {
     try {
       final deviceSnap = await FirebaseDatabase.instance.ref('devices/$_deviceId').get();
       final deviceMap = deviceSnap.value as Map?;
-      final pairId = deviceMap?['pairId'] as String?;
       final role = deviceMap?['role'] as String?;
-      if (pairId == null) return;
-      final pairSnap = await FirebaseDatabase.instance.ref('pairs/$pairId').get();
-      if (!pairSnap.exists || pairSnap.value == null) return;
-      final pair = PairData.fromMap(pairId, pairSnap.value as Map);
 
-      ZoneData? breachedZone;
-      if (role == 'tracked') {
-        for (final z in pair.zones) {
-          final zd = LocationService.calculateDistance(_myLat!, _myLon!, z.lat, z.lon);
-          if (zd < z.radius) { breachedZone = z; break; }
+      // Bir cihaz birden fazla eşleşmede yer alabilir (ör. 1 korunan –
+      // 2..4 uzaklaştırılan); devices altında tek bir pairId referansı
+      // tutulmaz, bu yüzden tüm pairs koleksiyonu taranıp bu cihazı
+      // içeren ilişkiler bulunur.
+      final pairsSnap = await FirebaseDatabase.instance.ref('pairs').get();
+      final pairsMap = pairsSnap.value as Map?;
+      if (pairsMap == null) return;
+
+      ZoneData? alarmZone;
+      double? alarmDistance;
+      String? alarmSoundId;
+      bool anyAlarm = false;
+
+      for (final entry in pairsMap.entries) {
+        final pairId = entry.key as String;
+        PairData pair;
+        try {
+          pair = PairData.fromMap(pairId, entry.value as Map);
+        } catch (_) {
+          continue;
         }
-      }
+        if (pair.protectedDeviceId != _deviceId && pair.trackedDeviceId != _deviceId) continue;
 
-      final otherId = pair.otherDeviceId(_deviceId);
-      final locSnap = await FirebaseDatabase.instance.ref('locations/$otherId').get();
-      double? d;
-      if (locSnap.exists && locSnap.value != null) {
-        final other = LocationData.fromMap(locSnap.value as Map);
-        d = LocationService.calculateDistance(_myLat!, _myLon!, other.lat, other.lon);
-        sendPort?.send({'type': 'distance', 'value': d});
-      }
+        ZoneData? breachedZone;
+        if (role == 'tracked') {
+          for (final z in pair.zones) {
+            final zd = LocationService.calculateDistance(_myLat!, _myLon!, z.lat, z.lon);
+            if (zd < z.radius) { breachedZone = z; break; }
+          }
+        }
 
-      final proximityAlarm = d != null && d < pair.threshold;
-      final isAlarm = proximityAlarm || breachedZone != null;
+        final otherId = pair.otherDeviceId(_deviceId);
+        final locSnap = await FirebaseDatabase.instance.ref('locations/$otherId').get();
+        double? d;
+        if (locSnap.exists && locSnap.value != null) {
+          final other = LocationData.fromMap(locSnap.value as Map);
+          d = LocationService.calculateDistance(_myLat!, _myLon!, other.lat, other.lon);
+        }
 
-      if (isAlarm) {
-        if (!_alarming) {
-          _alarming = true;
-          await NotificationService.startAlarm(d ?? 0, soundId: pair.alarmSound);
+        final proximityAlarm = d != null && d < pair.threshold;
+        final isAlarm = proximityAlarm || breachedZone != null;
+
+        if (isAlarm) {
+          anyAlarm = true;
+          alarmZone ??= breachedZone;
+          alarmDistance ??= d;
+          alarmSoundId ??= pair.alarmSound;
           if (breachedZone != null) {
             await LocationService.writeAlarmLog(pairId, _deviceId, 0, type: 'zone', zoneLabel: breachedZone.label);
           } else if (d != null) {
             await LocationService.writeAlarmLog(pairId, _deviceId, d);
           }
         }
+      }
+
+      sendPort?.send({'type': 'distance', 'value': alarmDistance});
+
+      if (anyAlarm) {
+        if (!_alarming) {
+          _alarming = true;
+          await NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
+        }
         FlutterForegroundTask.updateService(
-          notificationTitle: breachedZone != null ? '⚠️ YASAK BÖLGE — ${breachedZone.label}' : '⚠️ YAKLAŞMA — ${d?.round()}m',
-          notificationText: 'Eşik: ${pair.threshold.round()}m',
+          notificationTitle: alarmZone != null ? '⚠️ YASAK BÖLGE — ${alarmZone.label}' : '⚠️ YAKLAŞMA — ${alarmDistance?.round()}m',
+          notificationText: 'Aktif alarm',
         );
       } else {
         if (_alarming) { _alarming = false; await NotificationService.stopAlarm(); }
         FlutterForegroundTask.updateService(
-          notificationTitle: d != null ? 'UZAKDUR — Güvenli (${d.round()}m)' : 'UZAKDUR — İzleniyor',
+          notificationTitle: alarmDistance != null ? 'UZAKDUR — Güvenli (${alarmDistance.round()}m)' : 'UZAKDUR — İzleniyor',
           notificationText: 'İzleniyor',
         );
       }

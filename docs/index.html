@@ -231,7 +231,7 @@
       <span style="color:var(--muted); font-size:12px;">metre</span>
       <button id="pairBtn" onclick="createPair()">Eşleştir</button>
     </div>
-    <small class="hint">Sadece henüz eşleşmemiş "Korunan" ve "Uzaklaştırılan" cihazlar listelenir.</small>
+    <small class="hint">Bir korunan en fazla 4 uzaklaştırılan, bir uzaklaştırılan en fazla 4 korunan ile eşleştirilebilir. Aynı ikili sadece bir kez eşleştirilebilir.</small>
   </div>
 
   <div class="card">
@@ -375,18 +375,28 @@ function isOnline(d) {
   return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
 }
 
-function partnerName(deviceId) {
-  const pairId = devices[deviceId]?.pairId;
-  if (!pairId || !pairs[pairId]) return null;
-  const p = pairs[pairId];
-  const otherId = p.protectedDeviceId === deviceId ? p.trackedDeviceId : p.protectedDeviceId;
-  return devices[otherId]?.name || '(silinmiş cihaz)';
+const MAX_PARTNERS = 4;
+
+// Bir cihazın hangi eşleşmelerde yer aldığını doğrudan pairs koleksiyonundan
+// çıkarır — devices altında ayrı bir pairId referansı tutulmaz, böylece
+// senkron dışı kalabilecek bir kopya veri hiç oluşmaz.
+function pairIdsForDevice(deviceId) {
+  return Object.keys(pairs).filter(pid =>
+    pairs[pid].protectedDeviceId === deviceId || pairs[pid].trackedDeviceId === deviceId
+  );
 }
 
-function canonicalPairIds() {
+function partnerNames(deviceId) {
+  return pairIdsForDevice(deviceId).map(pid => {
+    const p = pairs[pid];
+    const otherId = p.protectedDeviceId === deviceId ? p.trackedDeviceId : p.protectedDeviceId;
+    return devices[otherId]?.name || '(silinmiş cihaz)';
+  });
+}
+
+function validPairIds() {
   return Object.keys(pairs).filter(pid =>
-    devices[pairs[pid].protectedDeviceId]?.pairId === pid &&
-    devices[pairs[pid].trackedDeviceId]?.pairId === pid
+    devices[pairs[pid].protectedDeviceId] && devices[pairs[pid].trackedDeviceId]
   );
 }
 
@@ -561,7 +571,7 @@ function renderAllCasesMap(pairIds) {
 function render() {
   const ids = Object.keys(devices);
   const onlineCount = ids.filter(id => isOnline(devices[id])).length;
-  const pairIds = canonicalPairIds();
+  const pairIds = validPairIds();
   document.getElementById('statDevices').textContent = ids.length;
   document.getElementById('statOnline').textContent = onlineCount;
   document.getElementById('statPairs').textContent = pairIds.length;
@@ -590,28 +600,27 @@ function render() {
     body.innerHTML = ids.map(id => {
       const d = devices[id];
       const online = isOnline(d);
-      const partner = partnerName(id);
+      const partners = partnerNames(id);
       const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 20 ? 'low' : ''}">🔋 ${d.battery}%</span>` : '<span class="batt">—</span>';
       return `<tr>
         <td>${escapeHtml(d.name || '—')}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
         <td><span class="dot ${online ? 'on' : 'off'}"></span>${online ? 'Çevrimiçi' : 'Çevrimdışı'}</td>
         <td>${batt}</td>
-        <td>${partner ? `🔗 ${escapeHtml(partner)}` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
+        <td>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
       </tr>`;
     }).join('');
   }
 
-  const unpaired = id => !devices[id].pairId;
-  const protectedOpts = ids.filter(id => devices[id].role === 'protected' && unpaired(id));
-  const trackedOpts = ids.filter(id => devices[id].role === 'tracked' && unpaired(id));
+  const protectedOpts = ids.filter(id => devices[id].role === 'protected' && pairIdsForDevice(id).length < MAX_PARTNERS);
+  const trackedOpts = ids.filter(id => devices[id].role === 'tracked' && pairIdsForDevice(id).length < MAX_PARTNERS);
   const selP = document.getElementById('selProtected');
   const selT = document.getElementById('selTracked');
   selP.innerHTML = protectedOpts.length
-    ? protectedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)}</option>`).join('')
+    ? protectedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)} (${pairIdsForDevice(id).length}/${MAX_PARTNERS})</option>`).join('')
     : '<option disabled selected>Uygun korunan cihaz yok</option>';
   selT.innerHTML = trackedOpts.length
-    ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)}</option>`).join('')
+    ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)} (${pairIdsForDevice(id).length}/${MAX_PARTNERS})</option>`).join('')
     : '<option disabled selected>Uygun uzaklaştırılan cihaz yok</option>';
 
   const list = document.getElementById('pairsList');
@@ -660,7 +669,13 @@ async function createPair() {
   const trackedId = document.getElementById('selTracked').value;
   const threshold = Number(document.getElementById('newThreshold').value) || 100;
   if (!protectedId || !trackedId || btn.disabled) return;
-  if (devices[protectedId]?.pairId || devices[trackedId]?.pairId) { await refresh(); return; }
+  if (pairIdsForDevice(protectedId).length >= MAX_PARTNERS || pairIdsForDevice(trackedId).length >= MAX_PARTNERS) {
+    alert(`Bir cihaz en fazla ${MAX_PARTNERS} eşleşmede yer alabilir.`);
+    await refresh();
+    return;
+  }
+  const alreadyPaired = Object.values(pairs).some(p => p.protectedDeviceId === protectedId && p.trackedDeviceId === trackedId);
+  if (alreadyPaired) { alert('Bu iki cihaz zaten birbiriyle eşleşmiş.'); return; }
   btn.disabled = true;
   try {
     const pairId = genId();
@@ -668,8 +683,6 @@ async function createPair() {
       protectedDeviceId: protectedId, trackedDeviceId: trackedId,
       threshold, alarmSound: 'siren', createdAt: Date.now(),
     });
-    await patchJSON(`devices/${protectedId}`, { pairId });
-    await patchJSON(`devices/${trackedId}`, { pairId });
     await refresh();
   } finally {
     btn.disabled = false;
@@ -680,8 +693,6 @@ async function removePair(pairId) {
   const p = pairs[pairId];
   if (!p) return;
   await deletePath(`pairs/${pairId}`);
-  await patchJSON(`devices/${p.protectedDeviceId}`, { pairId: null });
-  await patchJSON(`devices/${p.trackedDeviceId}`, { pairId: null });
   await refresh();
 }
 
@@ -760,7 +771,7 @@ function checkLiveEvents() {
 function checkTamper() {
   const banner = document.getElementById('tamperBanner');
   const messages = [];
-  for (const pid of canonicalPairIds()) {
+  for (const pid of validPairIds()) {
     const p = pairs[pid];
     const trackedId = p.trackedDeviceId;
     const d = devices[trackedId];
