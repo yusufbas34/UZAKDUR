@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>UZAKDUR — Yönetici Paneli</title>
+<style>
+  :root {
+    --bg: #0D0D0F; --surface: #16161A; --surface-high: #1E1E24; --border: #2A2A32;
+    --safe: #00C896; --warning: #FFB020; --danger: #FF3B30;
+    --role-a: #FF5F57; --role-b: #4FACFE;
+    --text: #F0F0F5; --text2: #9090A0; --muted: #55555F; --disabled: #3A3A44;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+  .header { display:flex; align-items:center; gap:12px; margin-bottom: 8px; }
+  .logo { width:38px; height:38px; border-radius:10px; background:rgba(255,59,48,.12); border:1px solid rgba(255,59,48,.3); display:flex; align-items:center; justify-content:center; font-size:18px; }
+  h1 { font-size:18px; letter-spacing:3px; font-weight:800; margin:0; }
+  .subtitle { color:var(--text2); font-size:13px; margin: 4px 0 32px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; margin-bottom:20px; }
+  .card h2 { font-size:12px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin:0 0 16px; font-weight:700; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align:left; color:var(--muted); font-weight:600; font-size:11px; letter-spacing:1px; padding: 6px 10px; border-bottom:1px solid var(--border); }
+  td { padding: 10px; border-bottom:1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom:none; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+  .dot.on { background:var(--safe); box-shadow:0 0 6px rgba(0,200,150,.6); }
+  .dot.off { background:var(--disabled); }
+  .badge { padding:3px 9px; border-radius:7px; font-size:11px; font-weight:700; }
+  .badge.protected { background:rgba(79,172,254,.12); color:var(--role-b); border:1px solid rgba(79,172,254,.3); }
+  .badge.tracked { background:rgba(255,95,87,.12); color:var(--role-a); border:1px solid rgba(255,95,87,.3); }
+  select, input[type=number], input[type=password], input[type=text] {
+    background:var(--surface-high); border:1px solid var(--border); color:var(--text);
+    border-radius:9px; padding:9px 11px; font-size:13px; outline:none;
+  }
+  select:focus, input:focus { border-color: var(--role-b); }
+  button { background:var(--danger); color:#fff; border:none; border-radius:9px; padding:9px 16px; font-size:13px; font-weight:700; cursor:pointer; }
+  button:hover { filter:brightness(1.08); }
+  button.secondary { background:var(--surface-high); color:var(--text2); border:1px solid var(--border); }
+  button.safe { background:var(--safe); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .empty { color:var(--muted); font-size:13px; padding: 12px 4px; }
+  .req { color:var(--warning); font-weight:700; font-size:12px; }
+  .pair-line { display:flex; align-items:center; gap:8px; font-weight:600; }
+  .arrow { color:var(--muted); }
+  #gate { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:50; }
+  #gate .box { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px; width:280px; text-align:center; }
+  #gate input { width:100%; margin: 14px 0; text-align:center; }
+  #gate button { width:100%; }
+  #gate .err { color:var(--danger); font-size:12px; min-height:16px; }
+  small.hint { color:var(--muted); font-size:11px; display:block; margin-top:6px; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div class="logo" style="margin:0 auto 12px;">📡</div>
+    <div style="font-weight:800; letter-spacing:2px; font-size:14px;">UZAKDUR ADMIN</div>
+    <input type="password" id="pw" placeholder="Şifre"/>
+    <div class="err" id="pwErr"></div>
+    <button onclick="tryLogin()">Giriş</button>
+  </div>
+</div>
+
+<div class="wrap" id="app" style="display:none;">
+  <div class="header">
+    <div class="logo">📡</div>
+    <h1>UZAKDUR ADMIN</h1>
+  </div>
+  <div class="subtitle">Cihazları eşleştir, alarm mesafesini ayarla, mesafe taleplerini yönet.</div>
+
+  <div class="card">
+    <h2>Kayıtlı Cihazlar</h2>
+    <table>
+      <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Eşleşme</th></tr></thead>
+      <tbody id="devicesBody"><tr><td class="empty" colspan="4">Yükleniyor…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Yeni Eşleştirme Oluştur</h2>
+    <div class="row">
+      <select id="selProtected"></select>
+      <span class="arrow">⇄</span>
+      <select id="selTracked"></select>
+      <input type="number" id="newThreshold" value="100" min="10" max="5000" style="width:90px;" title="Alarm eşiği (metre)"/>
+      <span style="color:var(--muted); font-size:12px;">metre</span>
+      <button onclick="createPair()">Eşleştir</button>
+    </div>
+    <small class="hint">Sadece henüz eşleşmemiş "Korunan" ve "Uzaklaştırılan" cihazlar listelenir.</small>
+  </div>
+
+  <div class="card">
+    <h2>Aktif Eşleşmeler</h2>
+    <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
+  </div>
+</div>
+
+<script>
+const DB_URL = 'https://uyari-f25c4-default-rtdb.europe-west1.firebasedatabase.app';
+const ADMIN_PASSWORD = 'uzakdur2026'; // İstersen bu satırı değiştirip kendi şifreni koy.
+
+const ROLE_LABEL = { protected: 'Korunan', tracked: 'Uzaklaştırılan' };
+
+function tryLogin() {
+  const val = document.getElementById('pw').value;
+  if (val === ADMIN_PASSWORD) {
+    localStorage.setItem('uzakdur_admin_ok', '1');
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    boot();
+  } else {
+    document.getElementById('pwErr').textContent = 'Hatalı şifre';
+  }
+}
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+if (localStorage.getItem('uzakdur_admin_ok') === '1') {
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  boot();
+}
+
+function genId() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let i = 0; i < 12; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+async function fetchJSON(path) {
+  const r = await fetch(`${DB_URL}/${path}.json`);
+  if (!r.ok) return null;
+  return r.json();
+}
+async function patchJSON(path, data) {
+  await fetch(`${DB_URL}/${path}.json`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+async function putJSON(path, data) {
+  await fetch(`${DB_URL}/${path}.json`, { method: 'PUT', body: JSON.stringify(data) });
+}
+async function deletePath(path) {
+  await fetch(`${DB_URL}/${path}.json`, { method: 'DELETE' });
+}
+
+let devices = {}, pairs = {};
+
+function isOnline(d) {
+  return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
+}
+
+function partnerName(deviceId) {
+  const pairId = devices[deviceId]?.pairId;
+  if (!pairId || !pairs[pairId]) return null;
+  const p = pairs[pairId];
+  const otherId = p.protectedDeviceId === deviceId ? p.trackedDeviceId : p.protectedDeviceId;
+  return devices[otherId]?.name || '(silinmiş cihaz)';
+}
+
+function render() {
+  const body = document.getElementById('devicesBody');
+  const ids = Object.keys(devices);
+  if (ids.length === 0) {
+    body.innerHTML = '<tr><td class="empty" colspan="4">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</td></tr>';
+  } else {
+    body.innerHTML = ids.map(id => {
+      const d = devices[id];
+      const online = isOnline(d);
+      const partner = partnerName(id);
+      return `<tr>
+        <td>${escapeHtml(d.name || '—')}</td>
+        <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
+        <td><span class="dot ${online ? 'on' : 'off'}"></span>${online ? 'Çevrimiçi' : 'Çevrimdışı'}</td>
+        <td>${partner ? `🔗 ${escapeHtml(partner)}` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const unpaired = id => !devices[id].pairId;
+  const protectedOpts = ids.filter(id => devices[id].role === 'protected' && unpaired(id));
+  const trackedOpts = ids.filter(id => devices[id].role === 'tracked' && unpaired(id));
+  const selP = document.getElementById('selProtected');
+  const selT = document.getElementById('selTracked');
+  selP.innerHTML = protectedOpts.length
+    ? protectedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)}</option>`).join('')
+    : '<option disabled selected>Uygun korunan cihaz yok</option>';
+  selT.innerHTML = trackedOpts.length
+    ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)}</option>`).join('')
+    : '<option disabled selected>Uygun uzaklaştırılan cihaz yok</option>';
+
+  const pairIds = Object.keys(pairs);
+  const list = document.getElementById('pairsList');
+  if (pairIds.length === 0) {
+    list.innerHTML = '<div class="empty">Henüz eşleştirme yok.</div>';
+  } else {
+    list.innerHTML = pairIds.map(pid => {
+      const p = pairs[pid];
+      const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+      const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+      const req = p.distanceRequest;
+      return `<div class="card" style="background:var(--surface-high); margin-bottom:12px;">
+        <div class="row" style="justify-content:space-between;">
+          <div class="pair-line">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
+          <button class="secondary" onclick="removePair('${pid}')">Eşleşmeyi Kaldır</button>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <span style="color:var(--muted); font-size:12px;">Alarm eşiği:</span>
+          <input type="number" id="th_${pid}" value="${p.threshold}" min="10" max="5000" style="width:90px;"/>
+          <span style="color:var(--muted); font-size:12px;">metre</span>
+          <button onclick="saveThreshold('${pid}')">Kaydet</button>
+          <span style="color:var(--muted); font-size:12px; margin-left:12px;">Alarm sesi: <b style="color:var(--text2)">${p.alarmSound || 'siren'}</b></span>
+        </div>
+        ${req ? `<div class="row" style="margin-top:12px;">
+          <span class="req">⚠ Talep: ${req.value}m</span>
+          <button class="safe" onclick="approveRequest('${pid}', ${req.value})">Onayla</button>
+          <button class="secondary" onclick="rejectRequest('${pid}')">Reddet</button>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function createPair() {
+  const protectedId = document.getElementById('selProtected').value;
+  const trackedId = document.getElementById('selTracked').value;
+  const threshold = Number(document.getElementById('newThreshold').value) || 100;
+  if (!protectedId || !trackedId) return;
+  const pairId = genId();
+  await putJSON(`pairs/${pairId}`, {
+    protectedDeviceId: protectedId, trackedDeviceId: trackedId,
+    threshold, alarmSound: 'siren', createdAt: Date.now(),
+  });
+  await patchJSON(`devices/${protectedId}`, { pairId });
+  await patchJSON(`devices/${trackedId}`, { pairId });
+  await refresh();
+}
+
+async function removePair(pairId) {
+  const p = pairs[pairId];
+  if (!p) return;
+  await deletePath(`pairs/${pairId}`);
+  await patchJSON(`devices/${p.protectedDeviceId}`, { pairId: null });
+  await patchJSON(`devices/${p.trackedDeviceId}`, { pairId: null });
+  await refresh();
+}
+
+async function saveThreshold(pairId) {
+  const val = Number(document.getElementById(`th_${pairId}`).value);
+  if (!val || val < 5) return;
+  await patchJSON(`pairs/${pairId}`, { threshold: val });
+  await refresh();
+}
+
+async function approveRequest(pairId, value) {
+  await patchJSON(`pairs/${pairId}`, { threshold: value, distanceRequest: null });
+  await refresh();
+}
+
+async function rejectRequest(pairId) {
+  await patchJSON(`pairs/${pairId}`, { distanceRequest: null });
+  await refresh();
+}
+
+async function refresh() {
+  const [d, p] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs')]);
+  devices = d || {};
+  pairs = p || {};
+  render();
+}
+
+let pollHandle = null;
+function boot() {
+  refresh();
+  if (!pollHandle) pollHandle = setInterval(refresh, 3000);
+}
+</script>
+</body>
+</html>

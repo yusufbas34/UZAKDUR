@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:intl/intl.dart';
+import '../models/roles.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../services/foreground_task_service.dart';
@@ -19,17 +20,18 @@ class LogEntry {
 }
 
 class MonitorScreen extends StatefulWidget {
+  final String deviceId;
+  final String name;
   final String role;
-  final double threshold;
-  const MonitorScreen({super.key, required this.role, required this.threshold});
+  const MonitorScreen({super.key, required this.deviceId, required this.name, required this.role});
   @override
   State<MonitorScreen> createState() => _MonitorScreenState();
 }
 
 class _MonitorScreenState extends State<MonitorScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  late final String _role, _otherRole;
-  late final double _threshold;
+  String? _pairId;
+  PairData? _pair;
   LocationData? _myLocation, _otherLocation;
   double? _distance;
   bool _isAlarm = false, _isRunning = false, _otherOnline = false;
@@ -39,7 +41,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   final _fmt = DateFormat('HH:mm:ss');
 
   StreamSubscription<Position>? _posSub;
-  StreamSubscription? _otherLocSub, _otherStatusSub;
+  StreamSubscription? _deviceSub, _pairSub, _otherLocSub, _otherOnlineSub;
   Timer? _pollTimer;
 
   late AnimationController _alarmCtrl;
@@ -50,6 +52,8 @@ class _MonitorScreenState extends State<MonitorScreen>
   Set<Circle> _circles = {};
   Set<Polyline> _polylines = {};
   bool _mapReady = false, _mapFollowsMe = true;
+
+  bool get _isProtected => widget.role == kRoleProtected;
 
   static const _darkMapStyle = '''[
     {"elementType":"geometry","stylers":[{"color":"#1a1a2e"}]},
@@ -65,9 +69,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void initState() {
     super.initState();
-    _role = widget.role;
-    _otherRole = _role == 'A' ? 'B' : 'A';
-    _threshold = widget.threshold;
     _alarmCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _alarmAnim = CurvedAnimation(parent: _alarmCtrl, curve: Curves.easeInOut);
     WidgetsBinding.instance.addObserver(this);
@@ -86,43 +87,67 @@ class _MonitorScreenState extends State<MonitorScreen>
       case LocationPermissionResult.granted: break;
     }
     setState(() { _isRunning = true; _statusText = 'Konum alınıyor…'; });
-    await ForegroundTaskService.start(role: _role, threshold: _threshold);
-    await LocationService.setOnline(_role, true);
+    await LocationService.setOnline(widget.deviceId, true);
+
+    _deviceSub = LocationService.listenDevice(widget.deviceId, _handleDeviceUpdate);
 
     _posSub = LocationService.startLocationStream().listen((pos) async {
       final loc = LocationData(lat: pos.latitude, lon: pos.longitude, timestamp: DateTime.now());
       if (!mounted) return;
       setState(() => _myLocation = loc);
-      await LocationService.writeLocation(_role, pos.latitude, pos.longitude);
+      await LocationService.writeLocation(widget.deviceId, pos.latitude, pos.longitude);
       _updateMap();
       _checkDistance();
     }, onError: (e) => _setError('GPS hatası: $e'));
 
-    _otherLocSub = LocationService.listenOtherLocation(_otherRole, (loc) {
-      if (!mounted) return;
-      setState(() => _otherLocation = loc);
-      _updateMap();
-      _checkDistance();
-    });
-
-    _otherStatusSub = LocationService.listenOtherStatus(_otherRole, (online) {
-      if (!mounted) return;
-      setState(() => _otherOnline = online);
-    });
-
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _checkDistance());
   }
 
+  void _handleDeviceUpdate(Map<dynamic, dynamic>? data) {
+    final newPairId = data?['pairId'] as String?;
+    if (newPairId == _pairId) return;
+    _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel();
+    _pairId = newPairId;
+    if (!mounted) return;
+    setState(() { _pair = null; _otherLocation = null; _otherOnline = false; });
+    if (newPairId == null) {
+      ForegroundTaskService.stop().ignore();
+      return;
+    }
+    bool subscribedOther = false;
+    _pairSub = LocationService.listenPair(newPairId, (pair) {
+      if (!mounted) return;
+      setState(() => _pair = pair);
+      if (!subscribedOther) {
+        subscribedOther = true;
+        final otherId = pair.otherDeviceId(widget.deviceId);
+        _otherLocSub = LocationService.listenOtherLocation(otherId, (loc) {
+          if (!mounted) return;
+          setState(() => _otherLocation = loc);
+          _updateMap();
+          _checkDistance();
+        });
+        _otherOnlineSub = LocationService.listenOtherOnline(otherId, (online) {
+          if (!mounted) return;
+          setState(() => _otherOnline = online);
+        });
+        ForegroundTaskService.start(deviceId: widget.deviceId);
+      }
+      _checkDistance();
+    });
+  }
+
   void _checkDistance() {
-    if (_myLocation == null || _otherLocation == null) return;
+    if (_myLocation == null || _otherLocation == null || _pair == null) return;
+    final threshold = _pair!.threshold;
     final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, _otherLocation!.lat, _otherLocation!.lon);
-    final isAlarm = d < _threshold;
+    final isAlarm = d < threshold;
     final now = _fmt.format(DateTime.now());
     if (!mounted) return;
     setState(() {
       _distance = d;
       _isAlarm = isAlarm;
-      _statusText = isAlarm ? 'Yaklaşma tespit edildi!' : d < _threshold * 1.5 ? 'Dikkat — Sınıra yaklaşıyor' : 'Güvenli mesafede';
+      _statusText = isAlarm ? 'Yaklaşma tespit edildi!' : d < threshold * 1.5 ? 'Dikkat — Sınıra yaklaşıyor' : 'Güvenli mesafede';
       if (_log.isEmpty || _log.first.isAlarm != isAlarm) {
         _log.insert(0, LogEntry(now, d, isAlarm));
         if (_log.length > 100) _log.removeLast();
@@ -130,8 +155,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     });
     if (isAlarm) {
       if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
-      NotificationService.startAlarm(d);
-      LocationService.writeAlarmLog(_role, d);
+      NotificationService.startAlarm(d, soundId: _pair!.alarmSound);
+      LocationService.writeAlarmLog(_pairId!, widget.deviceId, d);
     } else {
       _alarmCtrl.stop(); _alarmCtrl.reset();
       NotificationService.stopAlarm();
@@ -143,16 +168,17 @@ class _MonitorScreenState extends State<MonitorScreen>
     final markers = <Marker>{};
     final circles = <Circle>{};
     final polylines = <Polyline>{};
+    final threshold = _pair?.threshold ?? 100;
 
     if (_myLocation != null) {
       final pos = LatLng(_myLocation!.lat, _myLocation!.lon);
       markers.add(Marker(
         markerId: const MarkerId('me'), position: pos,
-        icon: BitmapDescriptor.defaultMarkerWithHue(_role == 'A' ? BitmapDescriptor.hueRed : BitmapDescriptor.hueAzure),
-        infoWindow: InfoWindow(title: 'Cihaz $_role (Ben)'), zIndex: 2,
+        icon: BitmapDescriptor.defaultMarkerWithHue(_isProtected ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueRed),
+        infoWindow: InfoWindow(title: '${widget.name} (Ben)'), zIndex: 2,
       ));
       circles.add(Circle(
-        circleId: const CircleId('threshold'), center: pos, radius: _threshold,
+        circleId: const CircleId('threshold'), center: pos, radius: threshold,
         fillColor: (_isAlarm ? AppColors.danger : AppColors.safe).withOpacity(0.08),
         strokeColor: (_isAlarm ? AppColors.danger : AppColors.safe).withOpacity(0.4),
         strokeWidth: 1,
@@ -164,8 +190,8 @@ class _MonitorScreenState extends State<MonitorScreen>
       markers.add(Marker(
         markerId: const MarkerId('other'),
         position: LatLng(_otherLocation!.lat, _otherLocation!.lon),
-        icon: BitmapDescriptor.defaultMarkerWithHue(_role == 'A' ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueRed),
-        infoWindow: InfoWindow(title: 'Cihaz $_otherRole'), zIndex: 1,
+        icon: BitmapDescriptor.defaultMarkerWithHue(_isProtected ? BitmapDescriptor.hueRed : BitmapDescriptor.hueAzure),
+        infoWindow: const InfoWindow(title: 'Eşleşilen cihaz'), zIndex: 1,
       ));
     }
 
@@ -192,11 +218,11 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Future<void> _stop() async {
-    _posSub?.cancel(); _otherLocSub?.cancel(); _otherStatusSub?.cancel(); _pollTimer?.cancel();
+    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel();
     _alarmCtrl.stop(); _alarmCtrl.reset();
     NotificationService.stopAlarm();
     ForegroundTaskService.stop().ignore();
-    LocationService.setOnline(_role, false).ignore();
+    LocationService.setOnline(widget.deviceId, false).ignore();
     if (!mounted) return;
     setState(() { _isRunning = false; _isAlarm = false; _statusText = 'Durduruldu'; });
   }
@@ -204,6 +230,61 @@ class _MonitorScreenState extends State<MonitorScreen>
   void _setError(String msg) {
     if (!mounted) return;
     setState(() { _errorText = msg; _isRunning = false; _statusText = 'Hata'; });
+  }
+
+  Future<void> _requestDistance() async {
+    if (_pairId == null || _pair == null) return;
+    double value = _pair!.threshold;
+    await showModalBottomSheet(
+      context: context, backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Mesafe Talebi', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 6),
+          Text('Yöneticiden yeni bir alarm eşiği talep et. Onaylanana kadar mevcut eşik geçerli kalır.',
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
+          const SizedBox(height: 20),
+          Text('${value.round()} metre', style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.danger)),
+          Slider(value: value, min: 20, max: 1000, divisions: 98,
+              activeColor: AppColors.danger, inactiveColor: AppColors.border,
+              onChanged: (v) => setSheet(() => value = v)),
+          const SizedBox(height: 12),
+          SizedBox(width: double.infinity, child: GestureDetector(
+            onTap: () async { await LocationService.requestDistanceChange(_pairId!, value); if (ctx.mounted) Navigator.pop(ctx); },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(12)),
+              alignment: Alignment.center,
+              child: Text('Talebi Gönder', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+            ),
+          )),
+        ]),
+      )),
+    );
+  }
+
+  Future<void> _pickAlarmSound() async {
+    if (_pairId == null || _pair == null) return;
+    await showModalBottomSheet(
+      context: context, backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Alarm Sesi', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 16),
+          ...kAlarmSounds.entries.map((e) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(e.key == _pair!.alarmSound ? Icons.check_circle_rounded : Icons.circle_outlined,
+                    color: e.key == _pair!.alarmSound ? AppColors.danger : AppColors.textDisabled),
+                title: Text(e.value, style: GoogleFonts.inter(color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+                onTap: () async { await LocationService.setAlarmSound(_pairId!, e.key); if (ctx.mounted) Navigator.pop(ctx); },
+              )),
+        ]),
+      ),
+    );
   }
 
   @override
@@ -214,16 +295,16 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _posSub?.cancel(); _otherLocSub?.cancel(); _otherStatusSub?.cancel(); _pollTimer?.cancel();
+    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel();
     _alarmCtrl.dispose(); _mapCtrl?.dispose();
     NotificationService.stopAlarm().ignore();
     ForegroundTaskService.stop().ignore();
-    LocationService.setOnline(_role, false).ignore();
+    LocationService.setOnline(widget.deviceId, false).ignore();
     super.dispose();
   }
 
-  Color get _roleColor => _role == 'A' ? AppColors.roleA : AppColors.roleB;
-  Color get _statusColor => _isAlarm ? AppColors.danger : _distance != null && _distance! < _threshold * 1.5 ? AppColors.warning : AppColors.safe;
+  Color get _roleColor => _isProtected ? AppColors.roleB : AppColors.roleA;
+  Color get _statusColor => _isAlarm ? AppColors.danger : _distance != null && _pair != null && _distance! < _pair!.threshold * 1.5 ? AppColors.warning : AppColors.safe;
 
   @override
   Widget build(BuildContext context) {
@@ -240,11 +321,11 @@ class _MonitorScreenState extends State<MonitorScreen>
             ),
             child: SafeArea(child: Column(children: [
               _buildTopBar(),
-              Expanded(child: _errorText != null ? _buildErrorState() : Column(children: [
-                _buildMap(),
-                _buildStatusBar(),
-                _buildBottom(),
-              ])),
+              Expanded(child: _errorText != null
+                  ? _buildErrorState()
+                  : _pairId == null
+                      ? _buildWaitingState()
+                      : Column(children: [_buildMap(), _buildStatusBar(), _buildBottom()])),
             ])),
           ),
         ),
@@ -256,28 +337,49 @@ class _MonitorScreenState extends State<MonitorScreen>
     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
     decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border, width: 0.5))),
     child: Row(children: [
-      GestureDetector(
-        onTap: () async { await _stop(); if (mounted) Navigator.pop(context); },
-        child: Container(width: 36, height: 36,
-            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
-            child: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.textSecondary, size: 16)),
-      ),
-      const SizedBox(width: 14),
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(color: _roleColor.withOpacity(0.12), borderRadius: BorderRadius.circular(8), border: Border.all(color: _roleColor.withOpacity(0.3))),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(_role == 'A' ? Icons.person_pin_circle_rounded : Icons.shield_rounded, color: _roleColor, size: 14),
+          Icon(_isProtected ? Icons.shield_rounded : Icons.person_pin_circle_rounded, color: _roleColor, size: 14),
           const SizedBox(width: 6),
-          Text(_role == 'A' ? 'Uzaklaştırma — A' : 'Korunan — B', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: _roleColor)),
+          Text(widget.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: _roleColor)),
         ]),
       ),
       const Spacer(),
+      if (_isProtected && _pairId != null) ...[
+        _IconBtn(icon: Icons.rule_rounded, onTap: _requestDistance),
+        const SizedBox(width: 8),
+        _IconBtn(icon: Icons.music_note_rounded, onTap: _pickAlarmSound),
+        const SizedBox(width: 10),
+      ],
       _OnlineDot(label: 'Ben', online: _isRunning, color: _roleColor),
-      const SizedBox(width: 10),
-      _OnlineDot(label: 'Cihaz $_otherRole', online: _otherOnline, color: _role == 'A' ? AppColors.roleB : AppColors.roleA),
+      if (_pairId != null) ...[
+        const SizedBox(width: 10),
+        _OnlineDot(label: 'Eşim', online: _otherOnline, color: _isProtected ? AppColors.roleA : AppColors.roleB),
+      ],
     ]),
   );
+
+  Widget _buildWaitingState() => Center(child: Padding(padding: const EdgeInsets.all(32), child: Column(mainAxisSize: MainAxisSize.min, children: [
+    Container(width: 72, height: 72, decoration: BoxDecoration(color: _roleColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+        child: Icon(Icons.hourglass_top_rounded, color: _roleColor, size: 34)),
+    const SizedBox(height: 22),
+    Text('Eşleştirme Bekleniyor', style: GoogleFonts.inter(fontSize: 19, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+    const SizedBox(height: 10),
+    Text('${widget.name} olarak kayıtlısın. Yönetici seni web panelinden bir cihazla eşleştirdiğinde izleme otomatik başlayacak.',
+        textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary, height: 1.6)),
+    const SizedBox(height: 20),
+    Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.safe)),
+        const SizedBox(width: 8),
+        Text('Cihaz çevrimiçi, konum paylaşılıyor', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+      ]),
+    ),
+  ])));
 
   Widget _buildMap() => Expanded(
     flex: 5,
@@ -293,15 +395,12 @@ class _MonitorScreenState extends State<MonitorScreen>
         onMapCreated: (ctrl) { _mapCtrl = ctrl; ctrl.setMapStyle(_darkMapStyle); setState(() => _mapReady = true); _updateMap(); },
         onCameraMove: (_) { if (_mapFollowsMe) setState(() => _mapFollowsMe = false); },
       ),
-      // Mesafe kartı
-      Positioned(top: 12, left: 12, child: _FloatingDistanceCard(distance: _distance, threshold: _threshold, isAlarm: _isAlarm, statusColor: _statusColor)),
-      // Harita kontrolleri
+      Positioned(top: 12, left: 12, child: _FloatingDistanceCard(distance: _distance, threshold: _pair?.threshold, isAlarm: _isAlarm, statusColor: _statusColor)),
       Positioned(top: 12, right: 12, child: Column(children: [
         _MapBtn(icon: _mapFollowsMe ? Icons.my_location_rounded : Icons.location_searching_rounded, active: _mapFollowsMe, color: _roleColor, onTap: () { setState(() => _mapFollowsMe = !_mapFollowsMe); _updateMap(); }),
         const SizedBox(height: 8),
         _MapBtn(icon: Icons.fit_screen_rounded, active: false, color: AppColors.textSecondary, onTap: () { setState(() => _mapFollowsMe = false); _updateMap(); }),
       ])),
-      // Alarm çizgisi
       if (_isAlarm) Positioned(bottom: 0, left: 0, right: 0,
           child: AnimatedBuilder(animation: _alarmAnim, builder: (_, __) => Container(height: 3, color: AppColors.danger.withOpacity(0.5 + 0.5 * _alarmAnim.value)))),
     ]),
@@ -321,7 +420,9 @@ class _MonitorScreenState extends State<MonitorScreen>
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(_statusText, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: _isAlarm ? AppColors.danger : AppColors.textPrimary)),
-        Text('Eşik: ${_threshold.round()}m  •  5 sn\'de bir güncelleniyor', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+        Text('Eşik: ${_pair?.threshold.round() ?? '—'}m  •  5 sn\'de bir güncelleniyor'
+                '${_isProtected && _pair?.distanceRequest != null ? '  •  Talep: ${_pair!.distanceRequest!.round()}m bekleniyor' : ''}',
+            style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
       ])),
       GestureDetector(
         onTap: _isRunning ? _stop : _start,
@@ -410,6 +511,17 @@ class _OnlineDot extends StatelessWidget {
   ]);
 }
 
+class _IconBtn extends StatelessWidget {
+  final IconData icon; final VoidCallback onTap;
+  const _IconBtn({required this.icon, required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(onTap: onTap, child: Container(
+    width: 32, height: 32,
+    decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(9), border: Border.all(color: AppColors.border)),
+    child: Icon(icon, color: AppColors.textSecondary, size: 16),
+  ));
+}
+
 class _FloatingDistanceCard extends StatelessWidget {
   final double? distance, threshold; final bool isAlarm; final Color statusColor;
   const _FloatingDistanceCard({required this.distance, required this.threshold, required this.isAlarm, required this.statusColor});
@@ -429,7 +541,7 @@ class _FloatingDistanceCard extends StatelessWidget {
         const SizedBox(width: 4),
         Padding(padding: const EdgeInsets.only(bottom: 2), child: Text('m', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
       ]),
-      Text('Eşik: ${threshold?.round()}m', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+      Text('Eşik: ${threshold?.round() ?? '—'}m', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
     ]),
   );
 }

@@ -15,10 +15,47 @@ class LocationData {
       );
 }
 
+class PairData {
+  final String id;
+  final String protectedDeviceId;
+  final String trackedDeviceId;
+  final double threshold;
+  final String alarmSound;
+  final double? distanceRequest;
+  const PairData({
+    required this.id,
+    required this.protectedDeviceId,
+    required this.trackedDeviceId,
+    required this.threshold,
+    required this.alarmSound,
+    this.distanceRequest,
+  });
+
+  factory PairData.fromMap(String id, Map<dynamic, dynamic> map) => PairData(
+        id: id,
+        protectedDeviceId: map['protectedDeviceId'] as String,
+        trackedDeviceId: map['trackedDeviceId'] as String,
+        threshold: ((map['threshold'] as num?) ?? 100).toDouble(),
+        alarmSound: (map['alarmSound'] as String?) ?? 'siren',
+        distanceRequest: (map['distanceRequest'] as Map?)?['value'] != null
+            ? ((map['distanceRequest']['value'] as num).toDouble())
+            : null,
+      );
+
+  String otherDeviceId(String myDeviceId) =>
+      myDeviceId == protectedDeviceId ? trackedDeviceId : protectedDeviceId;
+}
+
 enum LocationPermissionResult { granted, denied, deniedForever, serviceDisabled }
 
 class LocationService {
   static final _db = FirebaseDatabase.instance.ref();
+
+  static String generateDeviceId() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final rnd = Random.secure();
+    return List.generate(12, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
 
   static Future<LocationPermissionResult> requestPermissions() async {
     if (!await Geolocator.isLocationServiceEnabled()) return LocationPermissionResult.serviceDisabled;
@@ -31,28 +68,57 @@ class LocationService {
     return LocationPermissionResult.granted;
   }
 
-  static Future<void> writeLocation(String role, double lat, double lon) =>
-      _db.child('locations/$role').set({'lat': lat, 'lon': lon, 'ts': DateTime.now().millisecondsSinceEpoch});
+  // --- Device registry ---
+  static Future<void> registerDevice(String deviceId, String name, String role) =>
+      _db.child('devices/$deviceId').update({
+        'name': name,
+        'role': role,
+        'online': false,
+        'createdAt': ServerValue.timestamp,
+      });
 
-  static Future<void> setOnline(String role, bool online) =>
-      _db.child('status/$role').set({'online': online, 'ts': DateTime.now().millisecondsSinceEpoch});
+  static Future<void> setOnline(String deviceId, bool online) =>
+      _db.child('devices/$deviceId').update({'online': online, 'ts': DateTime.now().millisecondsSinceEpoch});
 
-  static Future<void> writeAlarmLog(String role, double distance) =>
-      _db.child('alarm_log').push().set({'role': role, 'distance': distance.round(), 'ts': DateTime.now().millisecondsSinceEpoch});
+  static StreamSubscription<DatabaseEvent> listenDevice(String deviceId, void Function(Map<dynamic, dynamic>?) onData) =>
+      _db.child('devices/$deviceId').onValue.listen((e) => onData(e.snapshot.value as Map<dynamic, dynamic>?));
 
-  static StreamSubscription<DatabaseEvent> listenOtherLocation(String role, void Function(LocationData) onData) =>
-      _db.child('locations/$role').onValue.listen((e) {
+  static StreamSubscription<DatabaseEvent> listenOtherOnline(String otherDeviceId, void Function(bool) onData) =>
+      _db.child('devices/$otherDeviceId/online').onValue.listen((e) => onData(e.snapshot.value == true));
+
+  // --- Pairing ---
+  static StreamSubscription<DatabaseEvent> listenPair(String pairId, void Function(PairData) onData) =>
+      _db.child('pairs/$pairId').onValue.listen((e) {
+        final v = e.snapshot.value;
+        if (v == null) return;
+        try { onData(PairData.fromMap(pairId, v as Map)); } catch (_) {}
+      });
+
+  static Future<void> requestDistanceChange(String pairId, double meters) =>
+      _db.child('pairs/$pairId/distanceRequest').set({'value': meters, 'ts': DateTime.now().millisecondsSinceEpoch});
+
+  static Future<void> setAlarmSound(String pairId, String soundId) =>
+      _db.child('pairs/$pairId/alarmSound').set(soundId);
+
+  // --- Location ---
+  static Future<void> writeLocation(String deviceId, double lat, double lon) =>
+      _db.child('locations/$deviceId').set({'lat': lat, 'lon': lon, 'ts': DateTime.now().millisecondsSinceEpoch});
+
+  static Future<LocationData?> getLocationOnce(String deviceId) async {
+    final snap = await _db.child('locations/$deviceId').get();
+    if (!snap.exists || snap.value == null) return null;
+    try { return LocationData.fromMap(snap.value as Map); } catch (_) { return null; }
+  }
+
+  static StreamSubscription<DatabaseEvent> listenOtherLocation(String otherDeviceId, void Function(LocationData) onData) =>
+      _db.child('locations/$otherDeviceId').onValue.listen((e) {
         final v = e.snapshot.value;
         if (v == null) return;
         try { onData(LocationData.fromMap(v as Map)); } catch (_) {}
       });
 
-  static StreamSubscription<DatabaseEvent> listenOtherStatus(String role, void Function(bool) onData) =>
-      _db.child('status/$role').onValue.listen((e) {
-        final v = e.snapshot.value;
-        if (v == null) { onData(false); return; }
-        try { onData((v as Map)['online'] == true); } catch (_) { onData(false); }
-      });
+  static Future<void> writeAlarmLog(String pairId, String deviceId, double distance) =>
+      _db.child('alarm_log/$pairId').push().set({'byDeviceId': deviceId, 'distance': distance.round(), 'ts': DateTime.now().millisecondsSinceEpoch});
 
   static Stream<Position> startLocationStream() => Geolocator.getPositionStream(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 3));
