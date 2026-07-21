@@ -145,6 +145,19 @@
   .feed-row:last-child { border-bottom:none; }
   #liveDot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:7px; box-shadow:0 0 8px rgba(22,162,94,.5); animation: pulse 1.4s ease-in-out infinite; }
   .zone-pin { font-size:19px; text-align:center; line-height:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); background:none !important; border:none !important; }
+  #allCasesMap { width:100%; height:420px; border-radius:14px; border:1px solid var(--border-soft); background:var(--surface-hover); }
+  .ops-row { cursor:pointer; }
+  .led { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:8px; flex-shrink:0; }
+  .led.critical { background:var(--danger); box-shadow:0 0 9px rgba(226,59,54,.7); animation: pulse .9s ease-in-out infinite; }
+  .led.warning { background:var(--warning); box-shadow:0 0 7px rgba(201,116,10,.5); }
+  .led.safe { background:var(--safe); box-shadow:0 0 6px rgba(22,162,94,.4); }
+  .led.unknown { background:var(--disabled); }
+  .status-label { font-size:11px; font-weight:800; letter-spacing:.5px; }
+  .status-label.critical { color:var(--danger); }
+  .status-label.warning { color:var(--warning); }
+  .status-label.safe { color:var(--safe); }
+  .status-label.unknown { color:var(--muted); }
+  .mono { font-family:'Courier New',monospace; font-size:12px; }
 </style>
 </head>
 <body>
@@ -175,6 +188,24 @@
     <div class="stat-card"><div class="num" id="statOnline">0</div><div class="lbl">Çevrimiçi</div></div>
     <div class="stat-card"><div class="num" id="statPairs">0</div><div class="lbl">Eşleşme</div></div>
     <div class="stat-card"><div class="num" id="statAlarmsToday" style="color:var(--danger);">0</div><div class="lbl">Bugün Alarm</div></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
+      <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
+    </div>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Durum</th><th>Vaka</th><th>Mesafe / Eşik</th><th>Son Olay</th><th>Pil</th><th>Cihazlar</th></tr></thead>
+      <tbody id="opsBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🗺️ Tüm Vakalar Haritası</h2>
+    <div id="allCasesMap"></div>
   </div>
 
   <div class="card">
@@ -358,6 +389,56 @@ function isValidLogEntry(e) {
   return !!e && typeof e === 'object' && typeof e.ts === 'number';
 }
 
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function trackedInAnyZone(pair, trackedLoc) {
+  if (!trackedLoc || !pair.zones) return null;
+  for (const [zid, z] of Object.entries(pair.zones)) {
+    if (haversine(trackedLoc.lat, trackedLoc.lon, z.lat, z.lon) < z.radius) return z;
+  }
+  return null;
+}
+
+function timeAgo(ts) {
+  if (!ts) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return 'az önce';
+  if (s < 3600) return Math.floor(s / 60) + ' dk önce';
+  if (s < 86400) return Math.floor(s / 3600) + ' sa önce';
+  return Math.floor(s / 86400) + ' gün önce';
+}
+
+// Live severity for a pair, computed the same way the app itself alarms
+// (proximity threshold + zone breach), plus a short grace window after a
+// panic press so it doesn't disappear from "critical" the instant distance
+// happens to read safe.
+function pairStatus(pairId) {
+  const p = pairs[pairId];
+  const pLoc = locations[p.protectedDeviceId];
+  const tLoc = locations[p.trackedDeviceId];
+  const distance = (pLoc && tLoc) ? haversine(pLoc.lat, pLoc.lon, tLoc.lat, tLoc.lon) : null;
+  const zone = trackedInAnyZone(p, tLoc);
+  const events = (alarmLogAll[pairId] ? Object.values(alarmLogAll[pairId]).filter(isValidLogEntry) : []);
+  const lastEvent = events.sort((a, b) => b.ts - a.ts)[0] || null;
+  const recentPanic = events.some(e => e.type === 'panic' && Date.now() - e.ts < 5 * 60000);
+
+  let status = 'unknown';
+  if (recentPanic || zone || (distance !== null && distance < p.threshold)) status = 'critical';
+  else if (distance !== null && distance < p.threshold * 1.5) status = 'warning';
+  else if (distance !== null) status = 'safe';
+
+  return { status, distance, zone, lastEvent, pLoc, tLoc };
+}
+
+const STATUS_ORDER = { critical: 0, warning: 1, safe: 2, unknown: 3 };
+const STATUS_LABEL = { critical: 'KRİTİK', warning: 'DİKKAT', safe: 'GÜVENLİ', unknown: 'BİLİNMİYOR' };
+
 function flatEvents() {
   const out = [];
   for (const pid of Object.keys(alarmLogAll)) {
@@ -392,6 +473,83 @@ function eventLine(e) {
   return `${e.distance}m mesafeye yaklaştı`;
 }
 
+function renderOpsBoard(pairIds) {
+  const tbody = document.getElementById('opsBody');
+  const q = (document.getElementById('opsSearch')?.value || '').trim().toLowerCase();
+
+  let rows = pairIds.map(pid => Object.assign({ pairId: pid, label: pairLabel(pid) }, pairStatus(pid)));
+  if (q) rows = rows.filter(r => r.label.toLowerCase().includes(q));
+  rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (b.lastEvent?.ts || 0) - (a.lastEvent?.ts || 0));
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td class="empty" colspan="6">${q ? 'Eşleşme bulunamadı.' : 'Henüz eşleştirme yok.'}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const p = pairs[r.pairId];
+    const pDev = devices[p.protectedDeviceId] || {};
+    const tDev = devices[p.trackedDeviceId] || {};
+    const distText = r.status === 'critical' && r.zone ? `🚫 ${escapeHtml(r.zone.label)}`
+      : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> / ${p.threshold}m`
+      : '—';
+    const battMin = [pDev.battery, tDev.battery].filter(b => typeof b === 'number');
+    const battText = battMin.length ? `🔋 ${Math.min(...battMin)}%` : '—';
+    const battLow = battMin.length && Math.min(...battMin) <= 20;
+    return `<tr class="ops-row" onclick="openDetail('${r.pairId}')">
+      <td><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></td>
+      <td>${escapeHtml(r.label)}</td>
+      <td>${distText}</td>
+      <td>${r.lastEvent ? escapeHtml(timeAgo(r.lastEvent.ts)) : '—'}</td>
+      <td><span class="${battLow ? 'batt low' : 'batt'}">${battText}</span></td>
+      <td><span class="dot ${isOnline(pDev) ? 'on' : 'off'}" title="Korunan"></span><span class="dot ${isOnline(tDev) ? 'on' : 'off'}" title="Uzaklaştırılan"></span></td>
+    </tr>`;
+  }).join('');
+}
+
+let allCasesMapObj = null, allCasesLayers = [];
+function renderAllCasesMap(pairIds) {
+  const el = document.getElementById('allCasesMap');
+  if (typeof L === 'undefined') {
+    if (!el.dataset.errShown) { el.innerHTML = '<div class="empty" style="padding:16px;">Harita yüklenemedi.</div>'; el.dataset.errShown = '1'; }
+    return;
+  }
+  if (!allCasesMapObj) {
+    allCasesMapObj = L.map('allCasesMap', { zoomControl: true, attributionControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(allCasesMapObj);
+    setTimeout(() => allCasesMapObj.invalidateSize(), 50);
+  }
+  allCasesLayers.forEach(l => allCasesMapObj.removeLayer(l));
+  allCasesLayers = [];
+
+  const colorFor = { critical: '#E23B36', warning: '#C9740A', safe: '#16A25E', unknown: '#8A93A3' };
+  const pts = [];
+  for (const pid of pairIds) {
+    const st = pairStatus(pid);
+    const color = colorFor[st.status];
+    const p = pairs[pid];
+    if (st.pLoc) {
+      const m = L.circleMarker([st.pLoc.lat, st.pLoc.lon], { radius: 7, color: '#2F6FED', fillColor: '#2F6FED', fillOpacity: .9, weight: 2 })
+        .addTo(allCasesMapObj).bindPopup('🛡️ ' + (devices[p.protectedDeviceId]?.name || 'Korunan'));
+      allCasesLayers.push(m);
+      pts.push([st.pLoc.lat, st.pLoc.lon]);
+    }
+    if (st.tLoc) {
+      const m = L.circleMarker([st.tLoc.lat, st.tLoc.lon], { radius: 7, color: color, fillColor: color, fillOpacity: .9, weight: 2 })
+        .addTo(allCasesMapObj).bindPopup('🎯 ' + (devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan') + ' — ' + STATUS_LABEL[st.status]);
+      allCasesLayers.push(m);
+      pts.push([st.tLoc.lat, st.tLoc.lon]);
+    }
+    if (st.pLoc && st.tLoc) {
+      const line = L.polyline([[st.pLoc.lat, st.pLoc.lon], [st.tLoc.lat, st.tLoc.lon]], { color: color, weight: 2, dashArray: '5,5', opacity: .7 }).addTo(allCasesMapObj);
+      allCasesLayers.push(line);
+    }
+  }
+  if (pts.length >= 2) allCasesMapObj.fitBounds(pts, { padding: [30, 30] });
+  else if (pts.length === 1) allCasesMapObj.setView(pts[0], 14);
+  else allCasesMapObj.setView([41.0082, 28.9784], 6);
+}
+
 function render() {
   const ids = Object.keys(devices);
   const onlineCount = ids.filter(id => isOnline(devices[id])).length;
@@ -402,6 +560,9 @@ function render() {
   const todayStart = new Date(); todayStart.setHours(0,0,0,0);
   const todayCount = flatEvents().filter(e => e.ts >= todayStart.getTime()).length;
   document.getElementById('statAlarmsToday').textContent = todayCount;
+
+  renderOpsBoard(pairIds);
+  renderAllCasesMap(pairIds);
 
   const feedEl = document.getElementById('liveFeed');
   const feed = flatEvents().slice(0, 12);
