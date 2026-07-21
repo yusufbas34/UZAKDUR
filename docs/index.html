@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <title>UZAKDUR — Yönetici Paneli</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -100,7 +103,7 @@
       <select id="selTracked"></select>
       <input type="number" id="newThreshold" value="100" min="10" max="5000" style="width:90px;" title="Alarm eşiği (metre)"/>
       <span style="color:var(--muted); font-size:12px;">metre</span>
-      <button onclick="createPair()">Eşleştir</button>
+      <button id="pairBtn" onclick="createPair()">Eşleştir</button>
     </div>
     <small class="hint">Sadece henüz eşleşmemiş "Korunan" ve "Uzaklaştırılan" cihazlar listelenir.</small>
   </div>
@@ -234,7 +237,12 @@ function render() {
     ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)}</option>`).join('')
     : '<option disabled selected>Uygun uzaklaştırılan cihaz yok</option>';
 
-  const pairIds = Object.keys(pairs);
+  // Only show pairs both member devices currently point back to — hides stale/orphaned
+  // records left behind if a pairing was created twice for the same two devices.
+  const pairIds = Object.keys(pairs).filter(pid =>
+    devices[pairs[pid].protectedDeviceId]?.pairId === pid &&
+    devices[pairs[pid].trackedDeviceId]?.pairId === pid
+  );
   const list = document.getElementById('pairsList');
   if (pairIds.length === 0) {
     list.innerHTML = '<div class="empty">Henüz eşleştirme yok.</div>';
@@ -274,18 +282,25 @@ function escapeHtml(s) {
 }
 
 async function createPair() {
+  const btn = document.getElementById('pairBtn');
   const protectedId = document.getElementById('selProtected').value;
   const trackedId = document.getElementById('selTracked').value;
   const threshold = Number(document.getElementById('newThreshold').value) || 100;
-  if (!protectedId || !trackedId) return;
-  const pairId = genId();
-  await putJSON(`pairs/${pairId}`, {
-    protectedDeviceId: protectedId, trackedDeviceId: trackedId,
-    threshold, alarmSound: 'siren', createdAt: Date.now(),
-  });
-  await patchJSON(`devices/${protectedId}`, { pairId });
-  await patchJSON(`devices/${trackedId}`, { pairId });
-  await refresh();
+  if (!protectedId || !trackedId || btn.disabled) return;
+  if (devices[protectedId]?.pairId || devices[trackedId]?.pairId) { await refresh(); return; }
+  btn.disabled = true;
+  try {
+    const pairId = genId();
+    await putJSON(`pairs/${pairId}`, {
+      protectedDeviceId: protectedId, trackedDeviceId: trackedId,
+      threshold, alarmSound: 'siren', createdAt: Date.now(),
+    });
+    await patchJSON(`devices/${protectedId}`, { pairId });
+    await patchJSON(`devices/${trackedId}`, { pairId });
+    await refresh();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function removePair(pairId) {
@@ -347,12 +362,17 @@ function openDetail(pairId) {
     </div>` : '';
   document.getElementById('detailOverlay').style.display = 'flex';
 
-  if (!detailMapObj) {
-    detailMapObj = L.map('detailMap', { zoomControl: true, attributionControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(detailMapObj);
+  try {
+    if (typeof L === 'undefined') throw new Error('Harita kütüphanesi (Leaflet) yüklenemedi — ağın unpkg.com adresine erişimi engelliyor olabilir.');
+    if (!detailMapObj) {
+      detailMapObj = L.map('detailMap', { zoomControl: true, attributionControl: false });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(detailMapObj);
+    }
+    setTimeout(() => detailMapObj.invalidateSize(), 50);
+    updateDetailMap();
+  } catch (e) {
+    document.getElementById('detailMap').innerHTML = `<div class="empty" style="color:var(--danger); padding:16px;">Harita yüklenemedi: ${escapeHtml(e.message)}</div>`;
   }
-  setTimeout(() => detailMapObj.invalidateSize(), 50);
-  updateDetailMap();
   loadDetailHistory(pairId);
 }
 
