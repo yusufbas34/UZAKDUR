@@ -635,12 +635,20 @@ function render() {
   const trackedOpts = ids.filter(id => devices[id].role === 'tracked' && pairIdsForDevice(id).length < MAX_PARTNERS);
   const selP = document.getElementById('selProtected');
   const selT = document.getElementById('selTracked');
+  // Bu iki select her poll'da (3sn) yeniden çiziliyor; innerHTML'i olduğu
+  // gibi değiştirmek tarayıcıda seçili değeri sıfırlar. Kullanıcı bir cihaz
+  // seçtikten sonra "seçim kayboluyor/değişiyor" hissi buradan geliyordu —
+  // önceki seçimi (hâlâ geçerliyse) geri yüklüyoruz.
+  const prevP = selP.value;
+  const prevT = selT.value;
   selP.innerHTML = protectedOpts.length
     ? protectedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)} (${pairIdsForDevice(id).length}/${MAX_PARTNERS})</option>`).join('')
     : '<option disabled selected>Uygun korunan cihaz yok</option>';
   selT.innerHTML = trackedOpts.length
     ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)} (${pairIdsForDevice(id).length}/${MAX_PARTNERS})</option>`).join('')
     : '<option disabled selected>Uygun uzaklaştırılan cihaz yok</option>';
+  if (protectedOpts.includes(prevP)) selP.value = prevP;
+  if (trackedOpts.includes(prevT)) selT.value = prevT;
 
   const list = document.getElementById('pairsList');
   if (pairIds.length === 0) {

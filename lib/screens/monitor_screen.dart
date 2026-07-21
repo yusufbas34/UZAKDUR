@@ -48,6 +48,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   final Map<String, StreamSubscription> _otherNameSubs = {};
   StreamSubscription? _pairsSub;
   String? _focusedPairId;
+  String? _lastAlarmPairId;
   bool _fgStarted = false;
 
   PairData? get _pair => _focusedPairId != null ? _pairs[_focusedPairId] : null;
@@ -313,9 +314,16 @@ class _MonitorScreenState extends State<MonitorScreen>
     if (!mounted) return;
     setState(() {
       _pairStatus = newStatus;
-      if (isAlarm && _focusedPairId != alarmPairId) {
+      // Odağı sadece YENİ bir alarm başladığında (önceki tick'te alarmda
+      // olan eşleşmeden farklıysa) değiştiriyoruz — aksi halde aynı
+      // eşleşme dakikalarca alarmda kalırken kullanıcı başka bir
+      // partnere manuel dokunduğunda odak sürekli geri sıçrıyordu. Genel
+      // alarm göstergeleri (ses/animasyon/durdur çubuğu) zaten odaktan
+      // bağımsız olarak çalışmaya devam ediyor, güvenlik kaybı yok.
+      if (isAlarm && alarmPairId != _lastAlarmPairId) {
         _focusedPairId = alarmPairId;
       }
+      _lastAlarmPairId = isAlarm ? alarmPairId : null;
       final focusedOtherLoc = _otherLocation;
       _distance = (_myLocation != null && focusedOtherLoc != null)
           ? LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, focusedOtherLoc.lat, focusedOtherLoc.lon)
