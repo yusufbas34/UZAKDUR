@@ -15,6 +15,7 @@ import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../services/foreground_task_service.dart';
 import '../services/disguise_service.dart';
+import '../services/update_service.dart';
 import '../theme/app_theme.dart';
 
 class LogEntry {
@@ -74,6 +75,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   String? _errorText;
   bool _panicSending = false;
   bool _disguised = false;
+  UpdateInfo? _updateInfo;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
   final _battery = Battery();
@@ -187,6 +189,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     _reportBattery();
     _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _reportBattery());
     _maybeShowBatteryDialog();
+    _checkForUpdate();
 
     if (_isProtected) {
       _myContactsSub = LocationService.listenDeviceContacts(widget.deviceId, (contacts) {
@@ -217,6 +220,12 @@ class _MonitorScreenState extends State<MonitorScreen>
       final level = await _battery.batteryLevel;
       await LocationService.writeBattery(widget.deviceId, level);
     } catch (_) {}
+  }
+
+  Future<void> _checkForUpdate() async {
+    final info = await UpdateService.checkForUpdate();
+    if (!mounted || info == null) return;
+    setState(() => _updateInfo = info);
   }
 
   void _handlePairsUpdate(Map<String, PairData> newPairs) {
@@ -762,6 +771,7 @@ class _MonitorScreenState extends State<MonitorScreen>
             ),
             child: SafeArea(child: Column(children: [
               _buildTopBar(),
+              if (_updateInfo != null) _buildUpdateBanner(),
               if (_pairs.isNotEmpty) _buildPartnerStrip(),
               Expanded(child: _errorText != null
                   ? _buildErrorState()
@@ -803,6 +813,24 @@ class _MonitorScreenState extends State<MonitorScreen>
       ],
       _OnlineDot(label: 'Ben', online: _isRunning, color: _roleColor),
     ]),
+  );
+
+  Widget _buildUpdateBanner() => GestureDetector(
+    onTap: () async {
+      final uri = Uri.parse(_updateInfo!.releaseUrl);
+      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+    },
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: AppColors.roleB.withOpacity(0.14),
+      child: Row(children: [
+        Icon(Icons.system_update_rounded, color: AppColors.roleB, size: 16),
+        const SizedBox(width: 8),
+        Expanded(child: Text('Yeni bir güncelleme var — indirmek için dokun', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.roleB))),
+        Icon(Icons.chevron_right_rounded, color: AppColors.roleB, size: 18),
+      ]),
+    ),
   );
 
   Widget _buildPartnerStrip() => Container(
