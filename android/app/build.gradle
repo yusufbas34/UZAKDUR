@@ -18,6 +18,16 @@ apply plugin: 'com.android.application'
 apply plugin: 'com.google.gms.google-services'
 apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
+// Release imzalama: CI, sabit bir keystore'u ortam değişkenlerinden
+// (GitHub Actions secrets) okuyup android/app/uzakdur-release.jks olarak
+// decode eder. Bu dosya/şifreler repoya asla commit edilmez (public repo).
+// Değişkenler yoksa (ör. yerel geliştirme) debug imzasına düşer — bu durumda
+// üretilen APK, gerçek release ile aynı imzayı taşımaz ve "update" olarak
+// kurulamaz; sadece CI'daki release imzası kalıcı/güncellenebilir olandır.
+def releaseKeystoreFile = file("uzakdur-release.jks")
+def hasReleaseSigning = releaseKeystoreFile.exists() &&
+        System.getenv("UZAKDUR_KEYSTORE_PASSWORD") != null
+
 android {
     namespace "com.uzakdur.app"
     compileSdkVersion 34
@@ -36,9 +46,20 @@ android {
         multiDexEnabled true
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile releaseKeystoreFile
+                storePassword System.getenv("UZAKDUR_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("UZAKDUR_KEY_ALIAS") ?: "uzakdur"
+                keyPassword System.getenv("UZAKDUR_KEY_PASSWORD") ?: System.getenv("UZAKDUR_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
             minifyEnabled false
             shrinkResources false
         }
