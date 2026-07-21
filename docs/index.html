@@ -142,7 +142,6 @@ const ROLE_LABEL = { protected: 'Korunan', tracked: 'Uzaklaştırılan' };
 function tryLogin() {
   const val = document.getElementById('pw').value;
   if (val === ADMIN_PASSWORD) {
-    localStorage.setItem('uzakdur_admin_ok', '1');
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     boot();
@@ -151,11 +150,6 @@ function tryLogin() {
   }
 }
 document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
-if (localStorage.getItem('uzakdur_admin_ok') === '1') {
-  document.getElementById('gate').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  boot();
-}
 
 function genId() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
