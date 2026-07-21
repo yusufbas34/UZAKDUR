@@ -23,6 +23,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _saving = false;
   bool _disguise = false;
   bool _obscurePassword = true;
+  bool _isLogin = false;
   String? _error;
 
   Future<void> _submit() async {
@@ -33,12 +34,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (password.length < 4) { setState(() => _error = 'Şifre en az 4 karakter olmalı.'); return; }
     setState(() { _saving = true; _error = null; });
     try {
-      // Bu e-posta ile daha önce kayıt olunmuşsa (ör. uygulama silinip
-      // tekrar kurulduğunda) yeni bir cihaz oluşturmak yerine mevcut hesaba
-      // giriş yapılır — böylece admin panelinde kopya kayıt oluşmaz. Her
-      // e-posta yalnızca bir cihaza bağlı olabilir.
       final account = await LocationService.findAccountByEmail(email);
 
+      if (_isLogin) {
+        if (account == null) {
+          setState(() { _error = 'Bu e-postayla kayıtlı bir hesap bulunamadı. "Kayıt Ol"u dener misin?'; _saving = false; });
+          return;
+        }
+        final hash = LocationService.hashPassword(account.email, password);
+        if (hash != account.passwordHash) {
+          setState(() { _error = 'Şifre yanlış. "Şifremi unuttum"u kullanabilirsin.'; _saving = false; });
+          return;
+        }
+        final p = await SharedPreferences.getInstance();
+        await p.setString('device_id', account.deviceId);
+        await p.setString('device_name', account.name);
+        await p.setString('device_role', account.role);
+        if (!mounted) return;
+        Navigator.pushReplacement(context, PageRouteBuilder(
+          pageBuilder: (_, a, __) => MonitorScreen(deviceId: account.deviceId, name: account.name, role: account.role),
+          transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
+          transitionDuration: const Duration(milliseconds: 400),
+        ));
+        return;
+      }
+
+      // Kayıt Ol modunda da, bu e-posta ile daha önce kayıt olunmuşsa (ör.
+      // uygulama silinip tekrar kurulduğunda) yeni bir cihaz oluşturmak
+      // yerine mevcut hesaba giriş yapılır — böylece admin panelinde kopya
+      // kayıt oluşmaz. Her e-posta yalnızca bir cihaza bağlı olabilir.
       if (account != null) {
         final hash = LocationService.hashPassword(account.email, password);
         if (hash != account.passwordHash) {
@@ -158,6 +182,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     super.dispose();
   }
 
+  Widget _buildModeTab(String label, bool selected, VoidCallback onTap) => GestureDetector(
+    onTap: onTap,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: selected ? AppColors.danger : Colors.transparent,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      alignment: Alignment.center,
+      child: Text(label, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: selected ? Colors.white : AppColors.textMuted)),
+    ),
+  );
+
   Widget _buildField(TextEditingController ctrl, String hint, {bool obscure = false, TextInputType? keyboardType, Widget? suffix}) => TextField(
     controller: ctrl,
     obscureText: obscure,
@@ -197,25 +235,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         Text('Bu bilgiler bir kez girilir. Cihaz eşleştirmesi ve mesafe\nayarları yönetici tarafından web panelinden yapılır.',
             style: GoogleFonts.inter(fontSize: 14, color: AppColors.textSecondary, height: 1.6)),
         const SizedBox(height: 10),
-        Text('Uygulamayı silip tekrar kurarsan, aynı e-posta ve şifreyle giriş yaparak eski cihazına devam edebilirsin — yeni kayıt oluşmaz. Her e-posta yalnızca bir cihaza ait olabilir.',
+        Text('Uygulamayı silip tekrar kurarsan, "Giriş Yap" ile aynı e-posta ve şifreyle eski cihazına devam edebilirsin — yeni kayıt oluşmaz. Her e-posta yalnızca bir cihaza ait olabilir.',
             style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
-        const SizedBox(height: 36),
-        Text('İSİM', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _nameCtrl,
-          style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 15),
-          decoration: InputDecoration(
-            hintText: 'Örn. Ahmet',
-            hintStyle: GoogleFonts.inter(color: AppColors.textDisabled),
-            filled: true, fillColor: AppColors.surface,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.roleA.withOpacity(0.6))),
-          ),
+        const SizedBox(height: 28),
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+          child: Row(children: [
+            Expanded(child: _buildModeTab('Giriş Yap', _isLogin, () => setState(() { _isLogin = true; _error = null; }))),
+            Expanded(child: _buildModeTab('Kayıt Ol', !_isLogin, () => setState(() { _isLogin = false; _error = null; }))),
+          ]),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 28),
+        if (!_isLogin) ...[
+          Text('İSİM', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _nameCtrl,
+            style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 15),
+            decoration: InputDecoration(
+              hintText: 'Örn. Ahmet',
+              hintStyle: GoogleFonts.inter(color: AppColors.textDisabled),
+              filled: true, fillColor: AppColors.surface,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.roleA.withOpacity(0.6))),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
         Text('E-POSTA', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
         const SizedBox(height: 12),
         _buildField(_emailCtrl, 'ornek@mail.com', keyboardType: TextInputType.emailAddress),
@@ -231,6 +280,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           onTap: _showForgotPassword,
           child: Text('Şifremi unuttum', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.roleB)),
         ),
+        if (!_isLogin) ...[
         const SizedBox(height: 32),
         Text('ROLÜNÜ SEÇ', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
         const SizedBox(height: 12),
@@ -248,7 +298,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           onTap: () => setState(() => _role = kRoleTracked),
         ),
         const SizedBox(height: 8),
-        Text('Not: Girdiğin kullanıcı adı/e-posta zaten kayıtlıysa ve şifre doğruysa, rol seçimi dikkate alınmadan doğrudan mevcut hesabına giriş yapılır.',
+        Text('Not: Girdiğin e-posta zaten kayıtlıysa ve şifre doğruysa, rol seçimi dikkate alınmadan doğrudan mevcut hesabına giriş yapılır.',
             style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled, height: 1.4)),
         if (_role == kRoleProtected) ...[
           const SizedBox(height: 16),
@@ -288,6 +338,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ]),
           ),
         ],
+        ],
         if (_error != null) ...[
           const SizedBox(height: 16),
           Text(_error!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.danger)),
@@ -306,7 +357,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               alignment: Alignment.center,
               child: _saving
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text('Devam Et', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                  : Text(_isLogin ? 'Giriş Yap' : 'Kaydol ve Başla', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
             ),
           ),
         ),
