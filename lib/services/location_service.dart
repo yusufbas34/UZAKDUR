@@ -9,13 +9,13 @@ class DeviceAccount {
   final String deviceId;
   final String name;
   final String role;
-  final String username;
+  final String email;
   final String passwordHash;
   const DeviceAccount({
     required this.deviceId,
     required this.name,
     required this.role,
-    required this.username,
+    required this.email,
     required this.passwordHash,
   });
 }
@@ -140,12 +140,12 @@ class LocationService {
   }
 
   // --- Device registry ---
-  // Şifre asla düz metin tutulmaz; kullanıcı adına bağlı basit bir tuzla
-  // (salt) hash'lenir. Firebase kuralları herkese açık okuma izni verdiği
-  // için bu, kurumsal düzeyde değil ama en azından düz metin şifre
-  // sızıntısını ve basit hash eşleşmesini önleyen asgari bir korumadır.
-  static String hashPassword(String username, String password) {
-    final salted = '${username.trim().toLowerCase()}::$password::uzakdur-v2';
+  // Şifre asla düz metin tutulmaz; e-postaya bağlı basit bir tuzla (salt)
+  // hash'lenir. Firebase kuralları herkese açık okuma izni verdiği için bu,
+  // kurumsal düzeyde değil ama en azından düz metin şifre sızıntısını ve
+  // basit hash eşleşmesini önleyen asgari bir korumadır.
+  static String hashPassword(String email, String password) {
+    final salted = '${email.trim().toLowerCase()}::$password::uzakdur-v2';
     return sha256.convert(utf8.encode(salted)).toString();
   }
 
@@ -153,25 +153,24 @@ class LocationService {
     String deviceId,
     String name,
     String role, {
-    required String username,
-    String? email,
+    required String email,
     required String passwordHash,
   }) =>
       _db.child('devices/$deviceId').update({
         'name': name,
         'role': role,
-        'username': username,
-        if (email != null && email.isNotEmpty) 'email': email,
+        'email': email,
         'passwordHash': passwordHash,
         'online': false,
         'createdAt': ServerValue.timestamp,
       });
 
-  // Cihaz silinip yeniden kurulduğunda aynı kullanıcı adı/e-posta + şifre
-  // ile tekrar kayıt yerine mevcut hesaba giriş yapılabilsin diye tüm
-  // devices koleksiyonu taranır (küçük ölçek için pahalı değil).
-  static Future<DeviceAccount?> findAccountByLogin(String usernameOrEmail) async {
-    final needle = usernameOrEmail.trim().toLowerCase();
+  // Her e-posta yalnızca bir cihaza ait olabilir; cihaz silinip yeniden
+  // kurulduğunda aynı e-posta + şifre ile tekrar kayıt yerine mevcut hesaba
+  // giriş yapılabilsin diye tüm devices koleksiyonu taranır (küçük ölçek
+  // için pahalı değil).
+  static Future<DeviceAccount?> findAccountByEmail(String email) async {
+    final needle = email.trim().toLowerCase();
     if (needle.isEmpty) return null;
     final snap = await _db.child('devices').get();
     if (!snap.exists || snap.value == null) return null;
@@ -180,21 +179,36 @@ class LocationService {
     for (final entry in v.entries) {
       final data = entry.value;
       if (data is! Map) continue;
-      final username = (data['username'] as String?)?.trim().toLowerCase();
-      final email = (data['email'] as String?)?.trim().toLowerCase();
+      final accountEmail = (data['email'] as String?)?.trim().toLowerCase();
       final hash = data['passwordHash'] as String?;
-      if (hash == null) continue;
-      if (username == needle || (email != null && email.isNotEmpty && email == needle)) {
+      if (hash == null || accountEmail == null || accountEmail.isEmpty) continue;
+      if (accountEmail == needle) {
         return DeviceAccount(
           deviceId: entry.key as String,
           name: (data['name'] as String?) ?? '',
           role: (data['role'] as String?) ?? '',
-          username: (data['username'] as String?) ?? usernameOrEmail,
+          email: accountEmail,
           passwordHash: hash,
         );
       }
     }
     return null;
+  }
+
+  // --- Şifremi unuttum: admin onaylı sıfırlama ---
+  // Gerçek bir e-posta sunucusu olmadığı için (ücretsiz/sunucusuz kurulum),
+  // kullanıcı yeni şifresini kendi seçer ve bir talep oluşturur; yönetici
+  // web panelinden onaylayınca yeni şifre devreye girer. Talep onaylanana
+  // kadar eski şifre geçerli kalır.
+  static Future<bool> requestPasswordReset(String email, String newPassword) async {
+    final account = await findAccountByEmail(email);
+    if (account == null) return false;
+    final newHash = hashPassword(account.email, newPassword);
+    await _db.child('devices/${account.deviceId}/passwordResetRequest').set({
+      'passwordHash': newHash,
+      'ts': DateTime.now().millisecondsSinceEpoch,
+    });
+    return true;
   }
 
   static Future<void> setOnline(String deviceId, bool online) =>
@@ -241,6 +255,26 @@ class LocationService {
   static Future<void> setAlarmSound(String pairId, String soundId) =>
       _db.child('pairs/$pairId/alarmSound').set(soundId);
 
+  // Korunan, acil durum kişisi ekleme/çıkarma işlemini doğrudan yapamaz;
+  // yöneticinin web panelinden onaylaması gereken bir talep oluşturur.
+  static Future<void> requestAddContact(String pairId, {required String name, String? phone, String? email, String type = 'family'}) =>
+      _db.child('pairs/$pairId/contactRequests').push().set({
+        'type': 'add',
+        'name': name,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        if (email != null && email.isNotEmpty) 'email': email,
+        'contactType': type,
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      });
+
+  static Future<void> requestRemoveContact(String pairId, String contactId, String contactName) =>
+      _db.child('pairs/$pairId/contactRequests').push().set({
+        'type': 'remove',
+        'targetContactId': contactId,
+        'targetName': contactName,
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      });
+
   // --- Location ---
   static Future<void> writeLocation(String deviceId, double lat, double lon) =>
       _db.child('locations/$deviceId').set({'lat': lat, 'lon': lon, 'ts': DateTime.now().millisecondsSinceEpoch});
@@ -267,8 +301,14 @@ class LocationService {
         'ts': DateTime.now().millisecondsSinceEpoch,
       });
 
+  // bestForNavigation, sürekli en yüksek frekanslı GPS+sensör füzyonunu
+  // zorlayıp pili gereksiz yere hızlı tüketir (yol tarifi gibi kullanımlar
+  // için tasarlanmış); bir yaklaşma alarmı için "high" yeterli hassasiyeti
+  // çok daha az güç harcayarak verir. distanceFilter'ın 3m'den 8m'ye
+  // çıkarılması da her küçük kıpırdanışta konum yazıp radyoyu uyandırmak
+  // yerine, gerçek harekette güncelleme yapılmasını sağlar.
   static Stream<Position> startLocationStream() => Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 3));
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 8));
 
   static double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     const R = 6371000.0;

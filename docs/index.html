@@ -215,11 +215,16 @@
 
   <div class="card">
     <h2>Kayıtlı Cihazlar</h2>
-    <small class="hint" style="margin-bottom:8px;">Uygulama artık kullanıcı adı/e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
+    <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
     <table>
       <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Pil</th><th>Eşleşme</th><th></th></tr></thead>
       <tbody id="devicesBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
     </table>
+  </div>
+
+  <div class="card">
+    <h2>🔐 Şifre Sıfırlama Talepleri</h2>
+    <div id="resetRequestsList" class="empty">Bekleyen talep yok.</div>
   </div>
 
   <div class="card">
@@ -265,6 +270,7 @@
 
     <h2 style="margin-top:20px;">Acil Durum Kişileri</h2>
     <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında e-postası olan kişilere taslak açılır. "Yakın" kişiler kısa bir bildirim, "Yetkili/Polis" olarak işaretlenenler ise daha resmi, ayrıntılı bir metin alır (SMS devre dışı).</small>
+    <div id="contactRequestsList"></div>
     <div id="contactList"></div>
     <div class="row" style="margin-top:10px;">
       <input type="text" id="ecName" placeholder="İsim" style="flex:1;"/>
@@ -582,6 +588,7 @@ function render() {
 
   renderOpsBoard(pairIds);
   renderAllCasesMap(pairIds);
+  renderResetRequests();
 
   const feedEl = document.getElementById('liveFeed');
   const feed = flatEvents().slice(0, 12);
@@ -656,6 +663,16 @@ function render() {
           <button class="safe" onclick="approveRequest('${pid}', ${req.value})">Onayla</button>
           <button class="secondary" onclick="rejectRequest('${pid}')">Reddet</button>
         </div>` : ''}
+        ${p.contactRequests ? Object.entries(p.contactRequests).map(([rid, r]) => {
+          const label = r.type === 'remove'
+            ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
+            : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi`;
+          return `<div class="row" style="margin-top:12px;">
+            <span class="req">⚠ ${label}</span>
+            <button class="safe" onclick="approveContactRequest('${pid}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${pid}','${rid}')">Reddet</button>
+          </div>`;
+        }).join('') : ''}
       </div>`;
     }).join('');
   }
@@ -695,6 +712,34 @@ async function removePair(pairId) {
   const p = pairs[pairId];
   if (!p) return;
   await deletePath(`pairs/${pairId}`);
+  await refresh();
+}
+
+function renderResetRequests() {
+  const el = document.getElementById('resetRequestsList');
+  const pending = Object.keys(devices).filter(id => devices[id].passwordResetRequest);
+  el.innerHTML = pending.length
+    ? pending.map(id => {
+        const d = devices[id];
+        return `<div class="hist-row"><span>🔐 ${escapeHtml(d.name || id)}${d.email ? ` — ${escapeHtml(d.email)}` : ''} <span style="color:var(--muted); font-size:11px;">(${timeAgo(d.passwordResetRequest.ts)})</span></span>
+          <span class="row" style="gap:8px;">
+            <button class="safe" onclick="approvePasswordReset('${id}')">Onayla</button>
+            <button class="secondary" onclick="rejectPasswordReset('${id}')">Reddet</button>
+          </span>
+        </div>`;
+      }).join('')
+    : '<div class="empty">Bekleyen talep yok.</div>';
+}
+
+async function approvePasswordReset(deviceId) {
+  const d = devices[deviceId];
+  if (!d || !d.passwordResetRequest) return;
+  await patchJSON(`devices/${deviceId}`, { passwordHash: d.passwordResetRequest.passwordHash, passwordResetRequest: null });
+  await refresh();
+}
+
+async function rejectPasswordReset(deviceId) {
+  await patchJSON(`devices/${deviceId}`, { passwordResetRequest: null });
   await refresh();
 }
 
@@ -819,7 +864,7 @@ async function refresh() {
     checkTamper();
     checkLiveEvents();
     render();
-    if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); renderContactList(openPairId); }
+    if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); renderContactList(openPairId); renderContactRequests(openPairId); }
     else if (openPairId && !pairs[openPairId]) closeDetail();
   } catch (e) {
     banner.style.display = 'block';
@@ -845,6 +890,7 @@ function openDetail(pairId) {
   document.getElementById('ecPhone').value = '';
   document.getElementById('ecEmail').value = '';
   renderContactList(pairId);
+  renderContactRequests(pairId);
   document.getElementById('dashboardView').classList.add('hidden');
   document.getElementById('caseView').classList.remove('hidden');
   window.scrollTo(0, 0);
@@ -955,6 +1001,48 @@ function renderContactList(pairId) {
   el.innerHTML = contacts.length
     ? contacts.map(([cid, c]) => `<div class="hist-row"><span>${c.type === 'authority' ? '🚓' : '👤'} ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}${c.type === 'authority' ? ' <span class="badge" style="background:var(--warning);color:#fff;">Yetkili</span>' : ''}</span><button class="secondary" onclick="deleteEmergencyContact('${pairId}','${cid}')">Sil</button></div>`).join('')
     : '<div class="empty">Henüz acil durum kişisi eklenmedi.</div>';
+}
+
+// Korunan rolü kişi ekleme/çıkarmayı doğrudan yapamaz; buradan onaylanır.
+function renderContactRequests(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('contactRequestsList');
+  if (!p) return;
+  const reqs = p.contactRequests ? Object.entries(p.contactRequests) : [];
+  el.innerHTML = reqs.length
+    ? `<small class="hint" style="margin-bottom:6px;">⚠ Bekleyen kişi talepleri</small>` + reqs.map(([rid, r]) => {
+        const label = r.type === 'remove'
+          ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
+          : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi (${escapeHtml(r.email || r.phone || '—')})`;
+        return `<div class="hist-row"><span class="req">${label}</span>
+          <span class="row" style="gap:8px;">
+            <button class="safe" onclick="approveContactRequest('${pairId}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${pairId}','${rid}')">Reddet</button>
+          </span>
+        </div>`;
+      }).join('')
+    : '';
+}
+
+async function approveContactRequest(pairId, requestId) {
+  const p = pairs[pairId];
+  const req = p?.contactRequests?.[requestId];
+  if (!req) return;
+  if (req.type === 'remove') {
+    if (req.targetContactId) await deletePath(`pairs/${pairId}/emergencyContacts/${req.targetContactId}`);
+  } else {
+    const cid = genId();
+    await patchJSON(`pairs/${pairId}/emergencyContacts/${cid}`, {
+      name: req.name || '', phone: req.phone || '', email: req.email || '', type: req.contactType || 'family',
+    });
+  }
+  await deletePath(`pairs/${pairId}/contactRequests/${requestId}`);
+  await refresh();
+}
+
+async function rejectContactRequest(pairId, requestId) {
+  await deletePath(`pairs/${pairId}/contactRequests/${requestId}`);
+  await refresh();
 }
 
 function updateDetailMap() {

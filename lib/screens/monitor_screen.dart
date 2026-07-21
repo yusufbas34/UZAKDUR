@@ -214,7 +214,23 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   void _checkDistance() {
-    if (_pairs.isEmpty) return;
+    if (_pairs.isEmpty) {
+      _pairStatus = {};
+      if (_isAlarm || _alarmCtrl.isAnimating) {
+        _alarmCtrl.stop(); _alarmCtrl.reset();
+        NotificationService.stopAlarm();
+      }
+      _wasCaution = false;
+      if (!mounted) return;
+      setState(() {
+        _isAlarm = false;
+        _alarmZoneLabel = null;
+        _distance = null;
+        _statusText = 'Eşleştirme yok';
+      });
+      _updateMap();
+      return;
+    }
     String? alarmPairId;
     ZoneData? alarmZone;
     double? alarmDistance;
@@ -442,24 +458,51 @@ class _MonitorScreenState extends State<MonitorScreen>
     if (_focusedPairId == null || _pair == null) return;
     final pairId = _focusedPairId!;
     double value = _pair!.threshold;
+    final textCtrl = TextEditingController(text: value.round().toString());
     await showModalBottomSheet(
       context: context, backgroundColor: AppColors.surface,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 24 + MediaQuery.of(ctx).viewInsets.bottom),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Mesafe Talebi', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           const SizedBox(height: 6),
           Text('Yöneticiden yeni bir alarm eşiği talep et. Onaylanana kadar mevcut eşik geçerli kalır.',
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
           const SizedBox(height: 20),
-          Text('${value.round()} metre', style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.danger)),
-          Slider(value: value, min: 20, max: 1000, divisions: 98,
+          TextField(
+            controller: textCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: false),
+            style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.danger),
+            decoration: InputDecoration(
+              suffixText: 'metre',
+              suffixStyle: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted),
+              filled: true, fillColor: AppColors.bg,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppColors.danger.withOpacity(0.6))),
+            ),
+            onChanged: (t) {
+              final parsed = double.tryParse(t.replaceAll(',', '.'));
+              if (parsed != null && parsed > 0) setSheet(() => value = parsed);
+            },
+          ),
+          const SizedBox(height: 8),
+          Slider(value: value.clamp(20.0, 1000.0), min: 20, max: 1000, divisions: 98,
               activeColor: AppColors.danger, inactiveColor: AppColors.border,
-              onChanged: (v) => setSheet(() => value = v)),
-          const SizedBox(height: 12),
+              onChanged: (v) => setSheet(() {
+                value = v;
+                textCtrl.text = v.round().toString();
+                textCtrl.selection = TextSelection.collapsed(offset: textCtrl.text.length);
+              })),
+          const SizedBox(height: 4),
+          Text('Kaydırıcı 20-1000m arası; daha büyük bir değeri kutuya elle yazabilirsin.',
+              style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled)),
+          const SizedBox(height: 16),
           SizedBox(width: double.infinity, child: GestureDetector(
-            onTap: () async { await LocationService.requestDistanceChange(pairId, value); if (ctx.mounted) Navigator.pop(ctx); },
+            onTap: value > 0 ? () async { await LocationService.requestDistanceChange(pairId, value); if (ctx.mounted) Navigator.pop(ctx); } : null,
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(12)),
@@ -470,6 +513,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         ]),
       )),
     );
+    textCtrl.dispose();
   }
 
   Future<void> _pickAlarmSound() async {
@@ -494,6 +538,105 @@ class _MonitorScreenState extends State<MonitorScreen>
       ),
     );
   }
+
+  Future<void> _manageContacts() async {
+    if (_focusedPairId == null || _pair == null) return;
+    final pairId = _focusedPairId!;
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    String contactType = 'family';
+    String? info;
+    await showModalBottomSheet(
+      context: context, backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => Padding(
+        padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 24 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Acil Durum Kişileri', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            Text('Ekleme/çıkarma doğrudan yapılmaz; yönetici onayladıktan sonra listeye yansır.',
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
+            const SizedBox(height: 16),
+            if (_pair!.emergencyContacts.isEmpty)
+              Text('Henüz kayıtlı acil durum kişisi yok.', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textDisabled))
+            else
+              ..._pair!.emergencyContacts.map((c) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(children: [
+                      Icon(c.type == 'authority' ? Icons.local_police_rounded : Icons.person_rounded, size: 16, color: AppColors.textMuted),
+                      const SizedBox(width: 8),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(c.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Text(c.email ?? c.phone ?? '—', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                      ])),
+                      GestureDetector(
+                        onTap: () async {
+                          await LocationService.requestRemoveContact(pairId, c.id, c.name);
+                          setSheet(() => info = '"${c.name}" için kaldırma talebi gönderildi.');
+                        },
+                        child: Text('Kaldır', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.danger)),
+                      ),
+                    ]),
+                  )),
+            const Divider(height: 28),
+            Text('Yeni Kişi Ekleme Talebi', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 10),
+            _sheetField(nameCtrl, 'İsim'),
+            const SizedBox(height: 8),
+            _sheetField(phoneCtrl, 'Telefon (opsiyonel)'),
+            const SizedBox(height: 8),
+            _sheetField(emailCtrl, 'E-posta', keyboardType: TextInputType.emailAddress),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _TypeChip(label: '👤 Yakın', selected: contactType == 'family', onTap: () => setSheet(() => contactType = 'family'))),
+              const SizedBox(width: 8),
+              Expanded(child: _TypeChip(label: '🚓 Yetkili', selected: contactType == 'authority', onTap: () => setSheet(() => contactType = 'authority'))),
+            ]),
+            if (info != null) ...[
+              const SizedBox(height: 12),
+              Text(info!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.safe)),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(width: double.infinity, child: GestureDetector(
+              onTap: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) { setSheet(() => info = 'İsim gerekli.'); return; }
+                await LocationService.requestAddContact(pairId,
+                    name: name, phone: phoneCtrl.text.trim(), email: emailCtrl.text.trim(), type: contactType);
+                nameCtrl.clear(); phoneCtrl.clear(); emailCtrl.clear();
+                setSheet(() => info = 'Ekleme talebi gönderildi.');
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(12)),
+                alignment: Alignment.center,
+                child: Text('Talebi Gönder', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+              ),
+            )),
+          ]),
+        ),
+      )),
+    );
+    nameCtrl.dispose(); phoneCtrl.dispose(); emailCtrl.dispose();
+  }
+
+  Widget _sheetField(TextEditingController ctrl, String hint, {TextInputType? keyboardType}) => TextField(
+    controller: ctrl,
+    keyboardType: keyboardType,
+    style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 14),
+    decoration: InputDecoration(
+      hintText: hint,
+      hintStyle: GoogleFonts.inter(color: AppColors.textDisabled, fontSize: 13),
+      filled: true, fillColor: AppColors.bg,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: AppColors.danger.withOpacity(0.6))),
+    ),
+  );
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -574,6 +717,8 @@ class _MonitorScreenState extends State<MonitorScreen>
         _IconBtn(icon: Icons.rule_rounded, onTap: _requestDistance),
         const SizedBox(width: 8),
         _IconBtn(icon: Icons.music_note_rounded, onTap: _pickAlarmSound),
+        const SizedBox(width: 8),
+        _IconBtn(icon: Icons.contacts_rounded, onTap: _manageContacts),
         const SizedBox(width: 8),
       ],
       if (_isProtected) ...[
@@ -778,6 +923,25 @@ class _IconBtn extends StatelessWidget {
     decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(9), border: Border.all(color: AppColors.border)),
     child: Icon(icon, color: AppColors.textSecondary, size: 16),
   ));
+}
+
+class _TypeChip extends StatelessWidget {
+  final String label; final bool selected; final VoidCallback onTap;
+  const _TypeChip({required this.label, required this.selected, required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: selected ? AppColors.danger.withOpacity(0.12) : AppColors.bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: selected ? AppColors.danger.withOpacity(0.5) : AppColors.border),
+      ),
+      child: Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: selected ? AppColors.danger : AppColors.textSecondary)),
+    ),
+  );
 }
 
 class _PanicButton extends StatelessWidget {

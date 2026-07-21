@@ -14,8 +14,9 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
+  static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
   final _nameCtrl = TextEditingController();
-  final _usernameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   String? _role;
@@ -26,23 +27,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _submit() async {
     final name = _nameCtrl.text.trim();
-    final username = _usernameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
     final password = _passwordCtrl.text;
-    if (username.isEmpty) { setState(() => _error = 'Kullanıcı adı gerekli.'); return; }
+    if (email.isEmpty || !_emailRegex.hasMatch(email)) { setState(() => _error = 'Geçerli bir e-posta gerekli.'); return; }
     if (password.length < 4) { setState(() => _error = 'Şifre en az 4 karakter olmalı.'); return; }
     setState(() { _saving = true; _error = null; });
     try {
-      // Aynı kullanıcı adı/e-posta ile daha önce kayıt olunmuşsa (ör. uygulama
-      // silinip tekrar kurulduğunda) yeni bir cihaz oluşturmak yerine mevcut
-      // hesaba giriş yapılır — böylece admin panelinde kopya kayıt oluşmaz.
-      var account = await LocationService.findAccountByLogin(username);
-      account ??= email.isNotEmpty ? await LocationService.findAccountByLogin(email) : null;
+      // Bu e-posta ile daha önce kayıt olunmuşsa (ör. uygulama silinip
+      // tekrar kurulduğunda) yeni bir cihaz oluşturmak yerine mevcut hesaba
+      // giriş yapılır — böylece admin panelinde kopya kayıt oluşmaz. Her
+      // e-posta yalnızca bir cihaza bağlı olabilir.
+      final account = await LocationService.findAccountByEmail(email);
 
       if (account != null) {
-        final hash = LocationService.hashPassword(account.username, password);
+        final hash = LocationService.hashPassword(account.email, password);
         if (hash != account.passwordHash) {
-          setState(() { _error = 'Bu kullanıcı adı/e-posta zaten kayıtlı ama şifre yanlış.'; _saving = false; });
+          setState(() { _error = 'Bu e-posta zaten kayıtlı ama şifre yanlış. Şifreni mi unuttun?'; _saving = false; });
           return;
         }
         final p = await SharedPreferences.getInstance();
@@ -51,7 +51,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await p.setString('device_role', account.role);
         if (!mounted) return;
         Navigator.pushReplacement(context, PageRouteBuilder(
-          pageBuilder: (_, a, __) => MonitorScreen(deviceId: account!.deviceId, name: account.name, role: account.role),
+          pageBuilder: (_, a, __) => MonitorScreen(deviceId: account.deviceId, name: account.name, role: account.role),
           transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
           transitionDuration: const Duration(milliseconds: 400),
         ));
@@ -62,9 +62,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (_role == null) { setState(() { _error = 'Rol seçmelisin.'; _saving = false; }); return; }
 
       final deviceId = LocationService.generateDeviceId();
-      final passwordHash = LocationService.hashPassword(username, password);
-      await LocationService.registerDevice(deviceId, name, _role!,
-          username: username, email: email.isNotEmpty ? email : null, passwordHash: passwordHash);
+      final passwordHash = LocationService.hashPassword(email, password);
+      await LocationService.registerDevice(deviceId, name, _role!, email: email, passwordHash: passwordHash);
       final p = await SharedPreferences.getInstance();
       await p.setString('device_id', deviceId);
       await p.setString('device_name', name);
@@ -85,10 +84,75 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  Future<void> _showForgotPassword() async {
+    final emailCtrl = TextEditingController(text: _emailCtrl.text.trim());
+    final newPassCtrl = TextEditingController();
+    String? error;
+    bool sending = false;
+    bool sent = false;
+    await showModalBottomSheet(
+      context: context, backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) => Padding(
+        padding: EdgeInsets.only(left: 24, right: 24, top: 24, bottom: 24 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Şifremi Unuttum', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const SizedBox(height: 6),
+          Text('Gerçek zamanlı e-posta gönderimi yok; talebin yöneticiye iletilir, o onaylayınca yeni şifrenle giriş yapabilirsin.',
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
+          const SizedBox(height: 20),
+          if (sent) ...[
+            Text('Talep gönderildi. Yönetici onayladıktan sonra yeni şifrenle giriş yapabilirsin.',
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.safe, height: 1.5)),
+            const SizedBox(height: 16),
+            SizedBox(width: double.infinity, child: GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(color: AppColors.surfaceHigh, borderRadius: BorderRadius.circular(12)),
+                alignment: Alignment.center,
+                child: Text('Kapat', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+            )),
+          ] else ...[
+            _buildField(emailCtrl, 'Kayıtlı e-postan', keyboardType: TextInputType.emailAddress),
+            const SizedBox(height: 12),
+            _buildField(newPassCtrl, 'Yeni şifre (en az 4 karakter)', obscure: true),
+            if (error != null) ...[
+              const SizedBox(height: 10),
+              Text(error!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.danger)),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(width: double.infinity, child: GestureDetector(
+              onTap: sending ? null : () async {
+                final e = emailCtrl.text.trim();
+                final np = newPassCtrl.text;
+                if (e.isEmpty || !_emailRegex.hasMatch(e)) { setSheet(() => error = 'Geçerli bir e-posta gir.'); return; }
+                if (np.length < 4) { setSheet(() => error = 'Yeni şifre en az 4 karakter olmalı.'); return; }
+                setSheet(() { sending = true; error = null; });
+                final ok = await LocationService.requestPasswordReset(e, np);
+                if (!ok) { setSheet(() { sending = false; error = 'Bu e-postayla kayıtlı bir hesap bulunamadı.'; }); return; }
+                setSheet(() { sending = false; sent = true; });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(color: sending ? AppColors.surfaceHigh : AppColors.danger, borderRadius: BorderRadius.circular(12)),
+                alignment: Alignment.center,
+                child: Text(sending ? 'Gönderiliyor…' : 'Sıfırlama Talebi Gönder', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+              ),
+            )),
+          ],
+        ]),
+      )),
+    );
+    emailCtrl.dispose();
+    newPassCtrl.dispose();
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _usernameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -133,7 +197,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         Text('Bu bilgiler bir kez girilir. Cihaz eşleştirmesi ve mesafe\nayarları yönetici tarafından web panelinden yapılır.',
             style: GoogleFonts.inter(fontSize: 14, color: AppColors.textSecondary, height: 1.6)),
         const SizedBox(height: 10),
-        Text('Uygulamayı silip tekrar kurarsan, aynı kullanıcı adı/e-posta ve şifreyle giriş yaparak eski cihazına devam edebilirsin — yeni kayıt oluşmaz.',
+        Text('Uygulamayı silip tekrar kurarsan, aynı e-posta ve şifreyle giriş yaparak eski cihazına devam edebilirsin — yeni kayıt oluşmaz. Her e-posta yalnızca bir cihaza ait olabilir.',
             style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
         const SizedBox(height: 36),
         Text('İSİM', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
@@ -152,11 +216,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        Text('KULLANICI ADI', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
-        const SizedBox(height: 12),
-        _buildField(_usernameCtrl, 'Örn. ahmet34'),
-        const SizedBox(height: 20),
-        Text('E-POSTA (opsiyonel, giriş için de kullanılabilir)', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 1)),
+        Text('E-POSTA', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
         const SizedBox(height: 12),
         _buildField(_emailCtrl, 'ornek@mail.com', keyboardType: TextInputType.emailAddress),
         const SizedBox(height: 20),
@@ -166,6 +226,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           icon: Icon(_obscurePassword ? Icons.visibility_rounded : Icons.visibility_off_rounded, color: AppColors.textMuted, size: 20),
           onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
         )),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _showForgotPassword,
+          child: Text('Şifremi unuttum', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.roleB)),
+        ),
         const SizedBox(height: 32),
         Text('ROLÜNÜ SEÇ', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
         const SizedBox(height: 12),
