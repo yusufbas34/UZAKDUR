@@ -18,6 +18,7 @@
   .logo { width:38px; height:38px; border-radius:10px; background:rgba(255,59,48,.12); border:1px solid rgba(255,59,48,.3); display:flex; align-items:center; justify-content:center; font-size:18px; }
   h1 { font-size:18px; letter-spacing:3px; font-weight:800; margin:0; }
   .subtitle { color:var(--text2); font-size:13px; margin: 4px 0 32px; }
+  #errBanner { display:none; background:rgba(255,59,48,.12); border:1px solid rgba(255,59,48,.4); color:var(--danger); border-radius:12px; padding:14px 16px; font-size:12px; margin-bottom:20px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; margin-bottom:20px; }
   .card h2 { font-size:12px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin:0 0 16px; font-weight:700; }
   table { width:100%; border-collapse: collapse; font-size: 13px; }
@@ -71,6 +72,7 @@
     <h1>UZAKDUR ADMIN</h1>
   </div>
   <div class="subtitle">Cihazları eşleştir, alarm mesafesini ayarla, mesafe taleplerini yönet.</div>
+  <div id="errBanner"></div>
 
   <div class="card">
     <h2>Kayıtlı Cihazlar</h2>
@@ -131,9 +133,21 @@ function genId() {
 }
 
 async function fetchJSON(path) {
-  const r = await fetch(`${DB_URL}/${path}.json`);
-  if (!r.ok) return null;
-  return r.json();
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const r = await fetch(`${DB_URL}/${path}.json`, { signal: ctrl.signal });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status} ${path}: ${body || r.statusText}`);
+    }
+    return await r.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`Zaman aşımı (10sn): ${path} yanıt vermedi.`);
+    throw new Error(`Ağ hatası (${path}): ${e.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 async function patchJSON(path, data) {
   await fetch(`${DB_URL}/${path}.json`, { method: 'PATCH', body: JSON.stringify(data) });
@@ -268,10 +282,17 @@ async function rejectRequest(pairId) {
 }
 
 async function refresh() {
-  const [d, p] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs')]);
-  devices = d || {};
-  pairs = p || {};
-  render();
+  const banner = document.getElementById('errBanner');
+  try {
+    const [d, p] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs')]);
+    devices = d || {};
+    pairs = p || {};
+    banner.style.display = 'none';
+    render();
+  } catch (e) {
+    banner.style.display = 'block';
+    banner.textContent = '⚠ Veri alınamadı: ' + e.message + '\n\nOlası sebepler: Firebase veritabanı kuralları okumaya kapalı olabilir, ya da bu ağ Firebase\'e erişimi engelliyor olabilir. Bu mesajı olduğu gibi Claude\'a ilet.';
+  }
 }
 
 let pollHandle = null;
@@ -279,6 +300,13 @@ function boot() {
   refresh();
   if (!pollHandle) pollHandle = setInterval(refresh, 3000);
 }
+
+window.addEventListener('unhandledrejection', ev => {
+  const banner = document.getElementById('errBanner');
+  if (!banner) return;
+  banner.style.display = 'block';
+  banner.textContent = '⚠ Beklenmeyen hata: ' + (ev.reason?.message || ev.reason) + '\n\nBu mesajı olduğu gibi Claude\'a ilet.';
+});
 </script>
 </body>
 </html>
