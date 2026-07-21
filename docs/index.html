@@ -4,6 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>UZAKDUR — Yönetici Paneli</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root {
     --bg: #0D0D0F; --surface: #16161A; --surface-high: #1E1E24; --border: #2A2A32;
@@ -52,6 +54,14 @@
   #gate button { width:100%; }
   #gate .err { color:var(--danger); font-size:12px; min-height:16px; }
   small.hint { color:var(--muted); font-size:11px; display:block; margin-top:6px; }
+  .pair-card-title { cursor:pointer; }
+  .pair-card-title:hover { text-decoration: underline; }
+  #detailOverlay { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60; display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding: 24px 16px; }
+  #detailBox { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; width:100%; max-width:640px; }
+  #detailMap { width:100%; height:260px; border-radius:12px; margin-top:10px; background:var(--surface-high); }
+  .detail-close { background:var(--surface-high); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:12px; }
+  .hist-row { display:flex; justify-content:space-between; font-size:12px; padding:6px 0; border-bottom:1px solid var(--border); }
+  .hist-row:last-child { border-bottom:none; }
 </style>
 </head>
 <body>
@@ -98,6 +108,25 @@
   <div class="card">
     <h2>Aktif Eşleşmeler</h2>
     <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
+  </div>
+</div>
+
+<div id="detailOverlay">
+  <div id="detailBox">
+    <div class="row" style="justify-content:space-between;">
+      <div class="pair-line" id="detailTitle" style="font-size:15px;"></div>
+      <button class="detail-close" onclick="closeDetail()">Kapat ✕</button>
+    </div>
+    <div id="detailMap"></div>
+    <div class="row" style="margin-top:14px;">
+      <span style="color:var(--muted); font-size:12px;">Alarm eşiği:</span>
+      <input type="number" id="detailThreshold" min="10" max="5000" style="width:90px;"/>
+      <span style="color:var(--muted); font-size:12px;">metre</span>
+      <button onclick="saveDetailThreshold()">Kaydet</button>
+    </div>
+    <div id="detailReq"></div>
+    <h2 style="margin-top:20px;">Önceki Uyarılar</h2>
+    <div id="detailHistory" class="empty">Yükleniyor…</div>
   </div>
 </div>
 
@@ -159,7 +188,8 @@ async function deletePath(path) {
   await fetch(`${DB_URL}/${path}.json`, { method: 'DELETE' });
 }
 
-let devices = {}, pairs = {};
+let devices = {}, pairs = {}, locations = {};
+let detailMapObj = null, detailMarkers = [], detailCircle = null, openPairId = null;
 
 function isOnline(d) {
   return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
@@ -216,8 +246,11 @@ function render() {
       const req = p.distanceRequest;
       return `<div class="card" style="background:var(--surface-high); margin-bottom:12px;">
         <div class="row" style="justify-content:space-between;">
-          <div class="pair-line">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
-          <button class="secondary" onclick="removePair('${pid}')">Eşleşmeyi Kaldır</button>
+          <div class="pair-line pair-card-title" onclick="openDetail('${pid}')">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
+          <div class="row" style="gap:8px;">
+            <button class="secondary" onclick="openDetail('${pid}')">Detay</button>
+            <button class="secondary" onclick="removePair('${pid}')">Eşleşmeyi Kaldır</button>
+          </div>
         </div>
         <div class="row" style="margin-top:14px;">
           <span style="color:var(--muted); font-size:12px;">Alarm eşiği:</span>
@@ -284,15 +317,100 @@ async function rejectRequest(pairId) {
 async function refresh() {
   const banner = document.getElementById('errBanner');
   try {
-    const [d, p] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs')]);
+    const [d, p, l] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs'), fetchJSON('locations')]);
     devices = d || {};
     pairs = p || {};
+    locations = l || {};
     banner.style.display = 'none';
     render();
+    if (openPairId && pairs[openPairId]) updateDetailMap();
+    else if (openPairId && !pairs[openPairId]) closeDetail();
   } catch (e) {
     banner.style.display = 'block';
     banner.textContent = '⚠ Veri alınamadı: ' + e.message + '\n\nOlası sebepler: Firebase veritabanı kuralları okumaya kapalı olabilir, ya da bu ağ Firebase\'e erişimi engelliyor olabilir. Bu mesajı olduğu gibi Claude\'a ilet.';
   }
+}
+
+function openDetail(pairId) {
+  const p = pairs[pairId];
+  if (!p) return;
+  openPairId = pairId;
+  const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+  const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+  document.getElementById('detailTitle').innerHTML = `🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}`;
+  document.getElementById('detailThreshold').value = p.threshold;
+  const reqEl = document.getElementById('detailReq');
+  reqEl.innerHTML = p.distanceRequest ? `<div class="row" style="margin-top:10px;">
+      <span class="req">⚠ Talep: ${p.distanceRequest.value}m</span>
+      <button class="safe" onclick="approveRequest('${pairId}', ${p.distanceRequest.value}); closeDetail();">Onayla</button>
+      <button class="secondary" onclick="rejectRequest('${pairId}'); closeDetail();">Reddet</button>
+    </div>` : '';
+  document.getElementById('detailOverlay').style.display = 'flex';
+
+  if (!detailMapObj) {
+    detailMapObj = L.map('detailMap', { zoomControl: true, attributionControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(detailMapObj);
+  }
+  setTimeout(() => detailMapObj.invalidateSize(), 50);
+  updateDetailMap();
+  loadDetailHistory(pairId);
+}
+
+function closeDetail() {
+  openPairId = null;
+  document.getElementById('detailOverlay').style.display = 'none';
+}
+
+function updateDetailMap() {
+  const p = pairs[openPairId];
+  if (!p || !detailMapObj) return;
+  detailMarkers.forEach(m => detailMapObj.removeLayer(m));
+  detailMarkers = [];
+  if (detailCircle) { detailMapObj.removeLayer(detailCircle); detailCircle = null; }
+
+  const pLoc = locations[p.protectedDeviceId];
+  const tLoc = locations[p.trackedDeviceId];
+  const pts = [];
+  if (pLoc) {
+    const m = L.marker([pLoc.lat, pLoc.lon]).addTo(detailMapObj).bindPopup('🛡️ ' + (devices[p.protectedDeviceId]?.name || 'Korunan'));
+    detailMarkers.push(m);
+    pts.push([pLoc.lat, pLoc.lon]);
+    detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold, color: '#FF3B30', fillColor: '#FF3B30', fillOpacity: 0.08, weight: 1 }).addTo(detailMapObj);
+  }
+  if (tLoc) {
+    const m = L.marker([tLoc.lat, tLoc.lon]).addTo(detailMapObj).bindPopup('🎯 ' + (devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan'));
+    detailMarkers.push(m);
+    pts.push([tLoc.lat, tLoc.lon]);
+  }
+  if (pts.length === 2) detailMapObj.fitBounds(pts, { padding: [30, 30] });
+  else if (pts.length === 1) detailMapObj.setView(pts[0], 16);
+  else detailMapObj.setView([41.0082, 28.9784], 6);
+}
+
+async function loadDetailHistory(pairId) {
+  const el = document.getElementById('detailHistory');
+  el.textContent = 'Yükleniyor…';
+  try {
+    const log = await fetchJSON(`alarm_log/${pairId}`);
+    if (openPairId !== pairId) return;
+    if (!log) { el.innerHTML = '<div class="empty">Henüz alarm kaydı yok.</div>'; return; }
+    const entries = Object.values(log).sort((a, b) => b.ts - a.ts).slice(0, 30);
+    el.innerHTML = entries.map(e => {
+      const name = devices[e.byDeviceId]?.name || '(silinmiş cihaz)';
+      const date = new Date(e.ts).toLocaleString('tr-TR');
+      return `<div class="hist-row"><span>${escapeHtml(date)} — ${escapeHtml(name)}</span><span style="color:var(--danger); font-weight:700;">${e.distance}m</span></div>`;
+    }).join('') || '<div class="empty">Henüz alarm kaydı yok.</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="empty" style="color:var(--danger)">Uyarı geçmişi alınamadı: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function saveDetailThreshold() {
+  if (!openPairId) return;
+  const val = Number(document.getElementById('detailThreshold').value);
+  if (!val || val < 5) return;
+  await patchJSON(`pairs/${openPairId}`, { threshold: val });
+  await refresh();
 }
 
 let pollHandle = null;
