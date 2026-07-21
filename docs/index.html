@@ -487,11 +487,21 @@ function pairLabel(pairId) {
   return `${pName} ⇄ ${tName}`;
 }
 
+// Eşleşme silindikten sonra da Canlı Akış'ta kimin kiminle olduğu görünsün
+// diye, o olayı yazarken isimler doğrudan olay kaydına gömülür; pair
+// silinince pairLabel() artık bulamaz, burada o gömülü isimlere düşülür.
+function eventPairLabel(e) {
+  if (pairs[e.pairId]) return pairLabel(e.pairId);
+  if (e.pName || e.tName) return `${e.pName || '?'} ⇄ ${e.tName || '?'}`;
+  return '(silinmiş eşleşme)';
+}
+
 function eventLine(e) {
   const type = e.type || 'proximity';
   if (type === 'panic') return `PANİK sinyali`;
   if (type === 'zone') return `Yasak bölgeye girdi: ${e.zoneLabel || ''}`;
   if (type === 'tamper') return `beklenmedik şekilde çevrimdışı oldu`;
+  if (type === 'pair_removed') return `Eşleşme sonlandırıldı`;
   return `${e.distance}m mesafeye yaklaştı`;
 }
 
@@ -596,7 +606,7 @@ function render() {
     const type = e.type || 'proximity';
     const badge = type === 'panic' ? '<span class="badge panic">PANİK</span>' : '';
     return `<div class="feed-row">
-      <span>${badge} <b>${escapeHtml(pairLabel(e.pairId))}</b> — ${escapeHtml(eventLine(e))}</span>
+      <span>${badge} <b>${escapeHtml(eventPairLabel(e))}</b> — ${escapeHtml(eventLine(e))}</span>
       <span style="color:var(--muted); white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('tr-TR')}</span>
     </div>`;
   }).join('') : '<div class="empty">Henüz olay yok.</div>';
@@ -711,6 +721,13 @@ async function createPair() {
 async function removePair(pairId) {
   const p = pairs[pairId];
   if (!p) return;
+  // Pair silindikten sonra pairLabel() artık ismi bulamayacağı için, isimler
+  // olay kaydına doğrudan gömülür (bkz. eventPairLabel) — böylece Canlı
+  // Akış'ta "eşleşme sonlandırıldı" kaydı hangi ikili olduğunu göstermeye
+  // devam eder.
+  const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+  const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+  await logEvent(pairId, 'pair_removed', { pName, tName });
   await deletePath(`pairs/${pairId}`);
   await refresh();
 }
@@ -750,6 +767,10 @@ async function deleteDevice(deviceId) {
   const warn = partners.length ? `\n\nBu cihaz ${partners.length} eşleşmede yer alıyor, bunlar da silinecek.` : '';
   if (!confirm(`"${d.name || deviceId}" cihazını silmek istediğine emin misin?${warn}`)) return;
   for (const pid of pairIdsForDevice(deviceId)) {
+    const p = pairs[pid];
+    const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+    const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+    await logEvent(pid, 'pair_removed', { pName, tName });
     await deletePath(`pairs/${pid}`);
   }
   await deletePath(`devices/${deviceId}`);
@@ -822,10 +843,14 @@ function checkLiveEvents() {
   if (firstRefresh) { firstRefresh = false; if (events[0]) lastSeenTs = events[0].ts; return; }
   if (newest.length === 0) return;
   lastSeenTs = Math.max(...newest.map(e => e.ts));
+  // Eşleşme sonlandırma kaydı sadece Canlı Akış'ta görünsün; admin zaten
+  // kendi yaptığı işlem için bildirim/ses almasın.
+  const alertable = newest.filter(e => e.type !== 'pair_removed');
+  if (!alertable.length) return;
   playBeep();
-  const e = newest[0];
+  const e = alertable[0];
   showNotif(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
-    body: `${pairLabel(e.pairId)} — ${eventLine(e)}`,
+    body: `${eventPairLabel(e)} — ${eventLine(e)}`,
   });
 }
 
