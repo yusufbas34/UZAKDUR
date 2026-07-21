@@ -42,10 +42,20 @@ class _MonitorScreenState extends State<MonitorScreen>
   Map<String, LocationData> _otherLocByPair = {};
   Map<String, bool> _otherOnlineByPair = {};
   Map<String, String> _otherNameByPair = {};
+  // Yasak bölgeler korunan cihaza bağlıdır (bkz. LocationService), ama bir
+  // uzaklaştırılan farklı korunan kişilerle eşleşebildiği için her eşleşme
+  // kendi protectedDeviceId'sinden bölgelerini ayrıca dinler.
+  Map<String, List<ZoneData>> _zonesByPair = {};
   Map<String, String> _pairStatus = {}; // pairId -> 'alarm' | 'caution' | 'safe' | 'unknown'
   final Map<String, StreamSubscription> _otherLocSubs = {};
   final Map<String, StreamSubscription> _otherOnlineSubs = {};
   final Map<String, StreamSubscription> _otherNameSubs = {};
+  final Map<String, StreamSubscription> _zonesSubs = {};
+  // Acil durum kişileri ise doğrudan korunan kişinin kendi cihazına bağlıdır
+  // (hangi uzaklaştırılanla eşleşmiş olursa olsun aynıdır), bu yüzden pair
+  // başına değil, sadece korunan rolüyse tek bir dinleyici yeterli.
+  List<EmergencyContact> _myContacts = [];
+  StreamSubscription? _myContactsSub;
   StreamSubscription? _pairsSub;
   String? _focusedPairId;
   String? _lastAlarmPairId;
@@ -93,6 +103,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     {"featureType":"transit","stylers":[{"visibility":"off"}]}
   ]''';
 
+  static const _panicKeysChannel = MethodChannel('uzakdur/panic_keys');
+
   @override
   void initState() {
     super.initState();
@@ -101,7 +113,15 @@ class _MonitorScreenState extends State<MonitorScreen>
     WidgetsBinding.instance.addObserver(this);
     ForegroundTaskService.init();
     _start();
-    if (_isProtected) _loadDisguiseState();
+    if (_isProtected) {
+      _loadDisguiseState();
+      // Ses tuşuna arka arkaya 3 kez basmak da (uygulama ön plandayken)
+      // sessiz panik tetikler — uzun basışa alternatif, daha hızlı bir yol.
+      _panicKeysChannel.setMethodCallHandler((call) async {
+        if (call.method == 'triplePress') _triggerPanic();
+        return null;
+      });
+    }
   }
 
   Future<void> _loadDisguiseState() async {
@@ -168,6 +188,13 @@ class _MonitorScreenState extends State<MonitorScreen>
     _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _reportBattery());
     _maybeShowBatteryDialog();
 
+    if (_isProtected) {
+      _myContactsSub = LocationService.listenDeviceContacts(widget.deviceId, (contacts) {
+        if (!mounted) return;
+        setState(() => _myContacts = contacts);
+      });
+    }
+
     _pairsSub = LocationService.listenPairsForDevice(widget.deviceId, _handlePairsUpdate);
 
     _posSub = LocationService.startLocationStream().listen((pos) async {
@@ -200,9 +227,11 @@ class _MonitorScreenState extends State<MonitorScreen>
       _otherLocSubs.remove(removedId)?.cancel();
       _otherOnlineSubs.remove(removedId)?.cancel();
       _otherNameSubs.remove(removedId)?.cancel();
+      _zonesSubs.remove(removedId)?.cancel();
       _otherLocByPair.remove(removedId);
       _otherOnlineByPair.remove(removedId);
       _otherNameByPair.remove(removedId);
+      _zonesByPair.remove(removedId);
       _pairStatus.remove(removedId);
     }
 
@@ -222,6 +251,12 @@ class _MonitorScreenState extends State<MonitorScreen>
       _otherNameSubs[addedId] = LocationService.listenDevice(otherId, (data) {
         if (!mounted) return;
         setState(() => _otherNameByPair[addedId] = (data?['name'] as String?) ?? 'Cihaz');
+      });
+      _zonesSubs[addedId] = LocationService.listenDeviceZones(pair.protectedDeviceId, (zones) {
+        if (!mounted) return;
+        setState(() => _zonesByPair[addedId] = zones);
+        _checkDistance();
+        _updateMap();
       });
     }
 
@@ -277,7 +312,7 @@ class _MonitorScreenState extends State<MonitorScreen>
 
       ZoneData? zone;
       if (!_isProtected && _myLocation != null) {
-        for (final z in pair.zones) {
+        for (final z in (_zonesByPair[pid] ?? const <ZoneData>[])) {
           final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, z.lat, z.lon);
           if (d < z.radius) { zone = z; break; }
         }
@@ -364,17 +399,16 @@ class _MonitorScreenState extends State<MonitorScreen>
       final loc = _myLocation;
       final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
 
+      for (final pid in _pairs.keys) {
+        await LocationService.writeAlarmLog(pid, widget.deviceId, 0, type: 'panic');
+      }
+
       final familyEmails = <String>{};
       final authorityEmails = <String>{};
-      for (final entry in _pairs.entries) {
-        final pid = entry.key;
-        final pair = entry.value;
-        await LocationService.writeAlarmLog(pid, widget.deviceId, 0, type: 'panic');
-        for (final c in pair.emergencyContacts) {
-          final email = c.email?.trim();
-          if (email == null || email.isEmpty) continue;
-          if (c.type == 'authority') { authorityEmails.add(email); } else { familyEmails.add(email); }
-        }
+      for (final c in _myContacts) {
+        final email = c.email?.trim();
+        if (email == null || email.isEmpty) continue;
+        if (c.type == 'authority') { authorityEmails.add(email); } else { familyEmails.add(email); }
       }
 
       if (familyEmails.isNotEmpty) {
@@ -433,8 +467,9 @@ class _MonitorScreenState extends State<MonitorScreen>
       ));
     }
 
-    if (_pair != null) {
-      for (final z in _pair!.zones) {
+    if (_focusedPairId != null) {
+      final zones = _zonesByPair[_focusedPairId] ?? const <ZoneData>[];
+      for (final z in zones) {
         final center = LatLng(z.lat, z.lon);
         circles.add(Circle(
           circleId: CircleId('zone_${z.id}'), center: center, radius: z.radius,
@@ -474,10 +509,12 @@ class _MonitorScreenState extends State<MonitorScreen>
   Future<void> _stop() async {
     _posSub?.cancel();
     _pairsSub?.cancel();
+    _myContactsSub?.cancel();
     for (final s in _otherLocSubs.values) { s.cancel(); }
     for (final s in _otherOnlineSubs.values) { s.cancel(); }
     for (final s in _otherNameSubs.values) { s.cancel(); }
-    _otherLocSubs.clear(); _otherOnlineSubs.clear(); _otherNameSubs.clear();
+    for (final s in _zonesSubs.values) { s.cancel(); }
+    _otherLocSubs.clear(); _otherOnlineSubs.clear(); _otherNameSubs.clear(); _zonesSubs.clear();
     _pollTimer?.cancel(); _batteryTimer?.cancel();
     _alarmCtrl.stop(); _alarmCtrl.reset();
     NotificationService.stopAlarm();
@@ -579,8 +616,6 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Future<void> _manageContacts() async {
-    if (_focusedPairId == null || _pair == null) return;
-    final pairId = _focusedPairId!;
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
@@ -599,10 +634,10 @@ class _MonitorScreenState extends State<MonitorScreen>
             Text('Ekleme/çıkarma doğrudan yapılmaz; yönetici onayladıktan sonra listeye yansır.',
                 style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
             const SizedBox(height: 16),
-            if (_pair!.emergencyContacts.isEmpty)
+            if (_myContacts.isEmpty)
               Text('Henüz kayıtlı acil durum kişisi yok.', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textDisabled))
             else
-              ..._pair!.emergencyContacts.map((c) => Padding(
+              ..._myContacts.map((c) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Row(children: [
                       Icon(c.type == 'authority' ? Icons.local_police_rounded : Icons.person_rounded, size: 16, color: AppColors.textMuted),
@@ -613,7 +648,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                       ])),
                       GestureDetector(
                         onTap: () async {
-                          await LocationService.requestRemoveContact(pairId, c.id, c.name);
+                          await LocationService.requestRemoveContact(widget.deviceId, c.id, c.name);
                           setSheet(() => info = '"${c.name}" için kaldırma talebi gönderildi.');
                         },
                         child: Text('Kaldır', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.danger)),
@@ -643,7 +678,7 @@ class _MonitorScreenState extends State<MonitorScreen>
               onTap: () async {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) { setSheet(() => info = 'İsim gerekli.'); return; }
-                await LocationService.requestAddContact(pairId,
+                await LocationService.requestAddContact(widget.deviceId,
                     name: name, phone: phoneCtrl.text.trim(), email: emailCtrl.text.trim(), type: contactType);
                 nameCtrl.clear(); phoneCtrl.clear(); emailCtrl.clear();
                 setSheet(() => info = 'Ekleme talebi gönderildi.');
@@ -687,9 +722,11 @@ class _MonitorScreenState extends State<MonitorScreen>
     WidgetsBinding.instance.removeObserver(this);
     _posSub?.cancel();
     _pairsSub?.cancel();
+    _myContactsSub?.cancel();
     for (final s in _otherLocSubs.values) { s.cancel(); }
     for (final s in _otherOnlineSubs.values) { s.cancel(); }
     for (final s in _otherNameSubs.values) { s.cancel(); }
+    for (final s in _zonesSubs.values) { s.cancel(); }
     _pollTimer?.cancel(); _batteryTimer?.cancel();
     _alarmCtrl.dispose(); _mapCtrl?.dispose();
     NotificationService.stopAlarm().ignore();

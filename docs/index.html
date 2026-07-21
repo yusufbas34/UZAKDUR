@@ -244,6 +244,7 @@
     <h2>Aktif Eşleşmeler</h2>
     <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
   </div>
+  <div style="text-align:center; color:var(--muted); font-size:11px; padding:8px 0 4px;">Yusuf BAŞ tarafından üretilmiştir</div>
 </div>
 </div>
 
@@ -305,6 +306,7 @@
       <input type="text" id="zoneLabel" placeholder="Ad (örn. Ev)" style="flex:1;"/>
       <input type="number" id="zoneRadius" placeholder="Yarıçap (m)" value="100" style="width:120px;"/>
     </div>
+    <small class="hint">Çok dar bir yarıçap (ör. 10-20m) telefonun GPS sapmasıyla yanlış alarm üretebilir ve daha sık kontrol gerektirdiği için pili daha çok tüketir. En az 100m öneririz.</small>
     <div class="row" style="margin-top:10px; justify-content:flex-end;">
       <button class="secondary" onclick="closeZonePicker()">İptal</button>
       <button class="safe" id="zoneSaveBtn" onclick="confirmAddZone()" disabled>Kaydet</button>
@@ -419,9 +421,22 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Yasak bölgeler ve acil durum kişileri artık pair'e değil korunan cihaza
+// bağlıdır (eşleşme silinip yeniden kurulunca kaybolmasın diye).
+function deviceZones(protectedDeviceId) {
+  return (devices[protectedDeviceId] && devices[protectedDeviceId].zones) || {};
+}
+function deviceContacts(protectedDeviceId) {
+  return (devices[protectedDeviceId] && devices[protectedDeviceId].emergencyContacts) || {};
+}
+function deviceContactRequests(protectedDeviceId) {
+  return (devices[protectedDeviceId] && devices[protectedDeviceId].contactRequests) || {};
+}
+
 function trackedInAnyZone(pair, trackedLoc) {
-  if (!trackedLoc || !pair.zones) return null;
-  for (const [zid, z] of Object.entries(pair.zones)) {
+  if (!trackedLoc) return null;
+  const zones = deviceZones(pair.protectedDeviceId);
+  for (const [zid, z] of Object.entries(zones)) {
     if (haversine(trackedLoc.lat, trackedLoc.lon, z.lat, z.lon) < z.radius) return z;
   }
   return null;
@@ -659,7 +674,7 @@ function render() {
       const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
       const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
       const req = p.distanceRequest;
-      const zoneCount = p.zones ? Object.keys(p.zones).length : 0;
+      const zoneCount = Object.keys(deviceZones(p.protectedDeviceId)).length;
       return `<div class="card" style="background:var(--surface-high); margin-bottom:12px;">
         <div class="row" style="justify-content:space-between;">
           <div class="pair-line pair-card-title" onclick="openDetail('${pid}')">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
@@ -681,16 +696,16 @@ function render() {
           <button class="safe" onclick="approveRequest('${pid}', ${req.value})">Onayla</button>
           <button class="secondary" onclick="rejectRequest('${pid}')">Reddet</button>
         </div>` : ''}
-        ${p.contactRequests ? Object.entries(p.contactRequests).map(([rid, r]) => {
+        ${Object.entries(deviceContactRequests(p.protectedDeviceId)).map(([rid, r]) => {
           const label = r.type === 'remove'
             ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
             : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi`;
           return `<div class="row" style="margin-top:12px;">
             <span class="req">⚠ ${label}</span>
-            <button class="safe" onclick="approveContactRequest('${pid}','${rid}')">Onayla</button>
-            <button class="secondary" onclick="rejectContactRequest('${pid}','${rid}')">Reddet</button>
+            <button class="safe" onclick="approveContactRequest('${p.protectedDeviceId}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${p.protectedDeviceId}','${rid}')">Reddet</button>
           </div>`;
-        }).join('') : ''}
+        }).join('')}
       </div>`;
     }).join('');
   }
@@ -989,50 +1004,54 @@ function closeZonePicker() {
 }
 async function confirmAddZone() {
   if (!zonePickerLatLng || !openPairId) return;
+  const p = pairs[openPairId];
+  if (!p) return;
   const label = document.getElementById('zoneLabel').value.trim() || 'Bölge';
   const radius = Number(document.getElementById('zoneRadius').value) || 100;
   const zoneId = genId();
-  await patchJSON(`pairs/${openPairId}/zones/${zoneId}`, { label, lat: zonePickerLatLng.lat, lon: zonePickerLatLng.lng, radius });
+  await patchJSON(`devices/${p.protectedDeviceId}/zones/${zoneId}`, { label, lat: zonePickerLatLng.lat, lon: zonePickerLatLng.lng, radius });
   closeZonePicker();
   await refresh();
 }
-function deleteZone(pairId, zoneId) {
-  deletePath(`pairs/${pairId}/zones/${zoneId}`).then(refresh);
+function deleteZone(protectedDeviceId, zoneId) {
+  deletePath(`devices/${protectedDeviceId}/zones/${zoneId}`).then(refresh);
 }
 function renderZoneList(pairId) {
   const p = pairs[pairId];
   const el = document.getElementById('zoneList');
   if (!p) return;
-  const zones = p.zones ? Object.entries(p.zones) : [];
+  const zones = Object.entries(deviceZones(p.protectedDeviceId));
   el.innerHTML = zones.length
-    ? zones.map(([zid, z]) => `<div class="hist-row"><span>🚫 ${escapeHtml(z.label)} (${z.radius}m)</span><button class="secondary" onclick="deleteZone('${pairId}','${zid}')">Sil</button></div>`).join('')
+    ? zones.map(([zid, z]) => `<div class="hist-row"><span>🚫 ${escapeHtml(z.label)} (${z.radius}m)</span><button class="secondary" onclick="deleteZone('${p.protectedDeviceId}','${zid}')">Sil</button></div>`).join('')
     : '<div class="empty">Henüz bölge eklenmedi.</div>';
 }
 
 async function addEmergencyContact() {
   if (!openPairId) return;
+  const p = pairs[openPairId];
+  if (!p) return;
   const name = document.getElementById('ecName').value.trim();
   const phone = document.getElementById('ecPhone').value.trim();
   const email = document.getElementById('ecEmail').value.trim();
   const type = document.getElementById('ecType').value;
   if (!name && !phone && !email) return;
   const cid = genId();
-  await patchJSON(`pairs/${openPairId}/emergencyContacts/${cid}`, { name, phone, email, type });
+  await patchJSON(`devices/${p.protectedDeviceId}/emergencyContacts/${cid}`, { name, phone, email, type });
   document.getElementById('ecName').value = '';
   document.getElementById('ecPhone').value = '';
   document.getElementById('ecEmail').value = '';
   await refresh();
 }
-function deleteEmergencyContact(pairId, contactId) {
-  deletePath(`pairs/${pairId}/emergencyContacts/${contactId}`).then(refresh);
+function deleteEmergencyContact(protectedDeviceId, contactId) {
+  deletePath(`devices/${protectedDeviceId}/emergencyContacts/${contactId}`).then(refresh);
 }
 function renderContactList(pairId) {
   const p = pairs[pairId];
   const el = document.getElementById('contactList');
   if (!p) return;
-  const contacts = p.emergencyContacts ? Object.entries(p.emergencyContacts) : [];
+  const contacts = Object.entries(deviceContacts(p.protectedDeviceId));
   el.innerHTML = contacts.length
-    ? contacts.map(([cid, c]) => `<div class="hist-row"><span>${c.type === 'authority' ? '🚓' : '👤'} ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}${c.type === 'authority' ? ' <span class="badge" style="background:var(--warning);color:#fff;">Yetkili</span>' : ''}</span><button class="secondary" onclick="deleteEmergencyContact('${pairId}','${cid}')">Sil</button></div>`).join('')
+    ? contacts.map(([cid, c]) => `<div class="hist-row"><span>${c.type === 'authority' ? '🚓' : '👤'} ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}${c.type === 'authority' ? ' <span class="badge" style="background:var(--warning);color:#fff;">Yetkili</span>' : ''}</span><button class="secondary" onclick="deleteEmergencyContact('${p.protectedDeviceId}','${cid}')">Sil</button></div>`).join('')
     : '<div class="empty">Henüz acil durum kişisi eklenmedi.</div>';
 }
 
@@ -1041,7 +1060,7 @@ function renderContactRequests(pairId) {
   const p = pairs[pairId];
   const el = document.getElementById('contactRequestsList');
   if (!p) return;
-  const reqs = p.contactRequests ? Object.entries(p.contactRequests) : [];
+  const reqs = Object.entries(deviceContactRequests(p.protectedDeviceId));
   el.innerHTML = reqs.length
     ? `<small class="hint" style="margin-bottom:6px;">⚠ Bekleyen kişi talepleri</small>` + reqs.map(([rid, r]) => {
         const label = r.type === 'remove'
@@ -1049,32 +1068,31 @@ function renderContactRequests(pairId) {
           : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi (${escapeHtml(r.email || r.phone || '—')})`;
         return `<div class="hist-row"><span class="req">${label}</span>
           <span class="row" style="gap:8px;">
-            <button class="safe" onclick="approveContactRequest('${pairId}','${rid}')">Onayla</button>
-            <button class="secondary" onclick="rejectContactRequest('${pairId}','${rid}')">Reddet</button>
+            <button class="safe" onclick="approveContactRequest('${p.protectedDeviceId}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${p.protectedDeviceId}','${rid}')">Reddet</button>
           </span>
         </div>`;
       }).join('')
     : '';
 }
 
-async function approveContactRequest(pairId, requestId) {
-  const p = pairs[pairId];
-  const req = p?.contactRequests?.[requestId];
+async function approveContactRequest(protectedDeviceId, requestId) {
+  const req = deviceContactRequests(protectedDeviceId)[requestId];
   if (!req) return;
   if (req.type === 'remove') {
-    if (req.targetContactId) await deletePath(`pairs/${pairId}/emergencyContacts/${req.targetContactId}`);
+    if (req.targetContactId) await deletePath(`devices/${protectedDeviceId}/emergencyContacts/${req.targetContactId}`);
   } else {
     const cid = genId();
-    await patchJSON(`pairs/${pairId}/emergencyContacts/${cid}`, {
+    await patchJSON(`devices/${protectedDeviceId}/emergencyContacts/${cid}`, {
       name: req.name || '', phone: req.phone || '', email: req.email || '', type: req.contactType || 'family',
     });
   }
-  await deletePath(`pairs/${pairId}/contactRequests/${requestId}`);
+  await deletePath(`devices/${protectedDeviceId}/contactRequests/${requestId}`);
   await refresh();
 }
 
-async function rejectContactRequest(pairId, requestId) {
-  await deletePath(`pairs/${pairId}/contactRequests/${requestId}`);
+async function rejectContactRequest(protectedDeviceId, requestId) {
+  await deletePath(`devices/${protectedDeviceId}/contactRequests/${requestId}`);
   await refresh();
 }
 
@@ -1101,14 +1119,12 @@ function updateDetailMap() {
     detailMarkers.push(m);
     pts.push([tLoc.lat, tLoc.lon]);
   }
-  if (p.zones) {
-    for (const [zid, z] of Object.entries(p.zones)) {
-      const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#C9740A', fillColor: '#C9740A', fillOpacity: 0.22, weight: 2, dashArray: '6,5' }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
-      detailZoneLayers.push(c);
-      const zm = L.marker([z.lat, z.lon], { icon: L.divIcon({ className: 'zone-pin', html: '🚫', iconSize: [22, 22] }) }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
-      detailZoneLayers.push(zm);
-      pts.push([z.lat, z.lon]);
-    }
+  for (const [zid, z] of Object.entries(deviceZones(p.protectedDeviceId))) {
+    const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#C9740A', fillColor: '#C9740A', fillOpacity: 0.22, weight: 2, dashArray: '6,5' }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
+    detailZoneLayers.push(c);
+    const zm = L.marker([z.lat, z.lon], { icon: L.divIcon({ className: 'zone-pin', html: '🚫', iconSize: [22, 22] }) }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
+    detailZoneLayers.push(zm);
+    pts.push([z.lat, z.lon]);
   }
   // Only auto-fit the view the first time this case's map has points to show —
   // afterwards just move the markers, so the admin's manual zoom/pan sticks

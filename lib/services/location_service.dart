@@ -73,8 +73,6 @@ class PairData {
   final double threshold;
   final String alarmSound;
   final double? distanceRequest;
-  final List<ZoneData> zones;
-  final List<EmergencyContact> emergencyContacts;
   const PairData({
     required this.id,
     required this.protectedDeviceId,
@@ -82,10 +80,14 @@ class PairData {
     required this.threshold,
     required this.alarmSound,
     this.distanceRequest,
-    this.zones = const [],
-    this.emergencyContacts = const [],
   });
 
+  // Not: yasak bölgeler ve acil durum kişileri artık pair'e değil, korunan
+  // cihaza (devices/{protectedDeviceId}/zones ve /emergencyContacts) bağlı
+  // tutulur. Böylece bir eşleşme kaldırılıp aynı ikili arasında yeniden
+  // kurulduğunda (ya da korunan başka bir uzaklaştırılanla eşleştiğinde) bu
+  // bilgiler kaybolmaz — LocationService.listenDeviceZones /
+  // listenDeviceContacts ile ayrıca dinlenir.
   factory PairData.fromMap(String id, Map<dynamic, dynamic> map) => PairData(
         id: id,
         protectedDeviceId: map['protectedDeviceId'] as String,
@@ -95,22 +97,6 @@ class PairData {
         distanceRequest: (map['distanceRequest'] as Map?)?['value'] != null
             ? ((map['distanceRequest']['value'] as num).toDouble())
             : null,
-        zones: (map['zones'] as Map?)
-                ?.entries
-                .map((e) {
-                  try { return ZoneData.fromMap(e.key as String, e.value as Map); } catch (_) { return null; }
-                })
-                .whereType<ZoneData>()
-                .toList() ??
-            const [],
-        emergencyContacts: (map['emergencyContacts'] as Map?)
-                ?.entries
-                .map((e) {
-                  try { return EmergencyContact.fromMap(e.key as String, e.value as Map); } catch (_) { return null; }
-                })
-                .whereType<EmergencyContact>()
-                .toList() ??
-            const [],
       );
 
   String otherDeviceId(String myDeviceId) =>
@@ -255,10 +241,39 @@ class LocationService {
   static Future<void> setAlarmSound(String pairId, String soundId) =>
       _db.child('pairs/$pairId/alarmSound').set(soundId);
 
+  // Yasak bölgeler ve acil durum kişileri korunan cihaza bağlıdır (pair'e
+  // değil) ki eşleşme kaldırılıp yeniden kurulduğunda kaybolmasın.
+  static StreamSubscription<DatabaseEvent> listenDeviceZones(
+          String protectedDeviceId, void Function(List<ZoneData>) onData) =>
+      _db.child('devices/$protectedDeviceId/zones').onValue.listen((e) {
+        final v = e.snapshot.value;
+        final result = <ZoneData>[];
+        if (v is Map) {
+          v.forEach((key, value) {
+            try { result.add(ZoneData.fromMap(key as String, value as Map)); } catch (_) {}
+          });
+        }
+        onData(result);
+      });
+
+  static StreamSubscription<DatabaseEvent> listenDeviceContacts(
+          String protectedDeviceId, void Function(List<EmergencyContact>) onData) =>
+      _db.child('devices/$protectedDeviceId/emergencyContacts').onValue.listen((e) {
+        final v = e.snapshot.value;
+        final result = <EmergencyContact>[];
+        if (v is Map) {
+          v.forEach((key, value) {
+            try { result.add(EmergencyContact.fromMap(key as String, value as Map)); } catch (_) {}
+          });
+        }
+        onData(result);
+      });
+
   // Korunan, acil durum kişisi ekleme/çıkarma işlemini doğrudan yapamaz;
   // yöneticinin web panelinden onaylaması gereken bir talep oluşturur.
-  static Future<void> requestAddContact(String pairId, {required String name, String? phone, String? email, String type = 'family'}) =>
-      _db.child('pairs/$pairId/contactRequests').push().set({
+  // protectedDeviceId, talebi gönderen korunan kişinin kendi deviceId'sidir.
+  static Future<void> requestAddContact(String protectedDeviceId, {required String name, String? phone, String? email, String type = 'family'}) =>
+      _db.child('devices/$protectedDeviceId/contactRequests').push().set({
         'type': 'add',
         'name': name,
         if (phone != null && phone.isNotEmpty) 'phone': phone,
@@ -267,8 +282,8 @@ class LocationService {
         'ts': DateTime.now().millisecondsSinceEpoch,
       });
 
-  static Future<void> requestRemoveContact(String pairId, String contactId, String contactName) =>
-      _db.child('pairs/$pairId/contactRequests').push().set({
+  static Future<void> requestRemoveContact(String protectedDeviceId, String contactId, String contactName) =>
+      _db.child('devices/$protectedDeviceId/contactRequests').push().set({
         'type': 'remove',
         'targetContactId': contactId,
         'targetName': contactName,

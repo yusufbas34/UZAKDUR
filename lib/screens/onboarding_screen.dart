@@ -274,6 +274,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ]),
             ),
           ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.volume_up_rounded, color: AppColors.textMuted, size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                'Bilgi: Uygulama açıkken ses tuşuna arka arkaya 3 kez hızlıca basarak da sessizce panik sinyali gönderebilirsin. Ekran kilitliyken veya başka bir uygulama açıkken çalışmaz — uygulamanın (gizlenmiş hâliyle bile) ön planda olması gerekir.',
+                style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted, height: 1.5),
+              )),
+            ]),
+          ),
         ],
         if (_error != null) ...[
           const SizedBox(height: 16),
@@ -297,6 +310,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 28),
+        Center(child: Text('Yusuf BAŞ tarafından üretilmiştir', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled))),
         const SizedBox(height: 40),
       ]),
     )),

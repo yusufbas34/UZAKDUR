@@ -26,10 +26,35 @@ class _ProximityHandler extends TaskHandler {
   // admin panelinde "çevrimdışı" görünmesin.
   double? _lastMinRatio;
 
+  // Yasak bölgeler partnere olan mesafeden bağımsız olabilir (ör. ev/iş
+  // konumu partnerden uzakta olabilir); sadece partner mesafesine göre
+  // seyreltmek bölgeye yaklaşmayı geç fark etmeye yol açardı. Bölge
+  // koordinatları son tam kontrolde önbelleğe alınır, her tick'te (ağ
+  // isteği olmadan, bedava) buna karşı mesafe hesaplanıp seyreltme kararına
+  // dahil edilir.
+  List<ZoneData> _cachedZones = [];
+  double? _lastZoneRatio;
+
+  void _updateZoneRatioFromCache() {
+    if (_myLat == null || _myLon == null || _cachedZones.isEmpty) {
+      _lastZoneRatio = null;
+      return;
+    }
+    double? minRatio;
+    for (final z in _cachedZones) {
+      if (z.radius <= 0) continue;
+      final d = LocationService.calculateDistance(_myLat!, _myLon!, z.lat, z.lon);
+      final ratio = d / z.radius;
+      if (minRatio == null || ratio < minRatio) minRatio = ratio;
+    }
+    _lastZoneRatio = minRatio;
+  }
+
   bool _shouldFullCheck() {
     if (_alarming) return true; // alarm aktifken her zaman tam kontrol (yasak bölge çıkışı da dahil)
-    final ratio = _lastMinRatio;
-    if (ratio == null) return true;
+    final candidates = [_lastMinRatio, _lastZoneRatio].whereType<double>();
+    if (candidates.isEmpty) return true;
+    final ratio = candidates.reduce((a, b) => a < b ? a : b);
     if (ratio < 1.3) return true;
     if (ratio < 2.5) return _tick % 2 == 0;
     return _tick % 6 == 0;
@@ -58,6 +83,7 @@ class _ProximityHandler extends TaskHandler {
       try { await LocationService.writeBattery(_deviceId, await _battery.batteryLevel); } catch (_) {}
     }
     if (_myLat == null || _myLon == null) return;
+    _updateZoneRatioFromCache();
     if (!_shouldFullCheck()) return;
     try {
       final deviceSnap = await FirebaseDatabase.instance.ref('devices/$_deviceId').get();
@@ -77,6 +103,7 @@ class _ProximityHandler extends TaskHandler {
       String? alarmSoundId;
       bool anyAlarm = false;
       double? minRatio;
+      final zonesSeen = <ZoneData>[];
 
       for (final entry in pairsMap.entries) {
         final pairId = entry.key as String;
@@ -90,7 +117,18 @@ class _ProximityHandler extends TaskHandler {
 
         ZoneData? breachedZone;
         if (role == 'tracked') {
-          for (final z in pair.zones) {
+          // Yasak bölgeler pair'e değil korunan cihaza bağlıdır (eşleşme
+          // silinip yeniden kurulunca kaybolmasın diye).
+          final zonesSnap = await FirebaseDatabase.instance.ref('devices/${pair.protectedDeviceId}/zones').get();
+          final zonesMap = zonesSnap.value as Map?;
+          final pairZones = <ZoneData>[];
+          if (zonesMap != null) {
+            zonesMap.forEach((zid, zval) {
+              try { pairZones.add(ZoneData.fromMap(zid as String, zval as Map)); } catch (_) {}
+            });
+          }
+          zonesSeen.addAll(pairZones);
+          for (final z in pairZones) {
             final zd = LocationService.calculateDistance(_myLat!, _myLon!, z.lat, z.lon);
             if (zd < z.radius) { breachedZone = z; break; }
           }
@@ -125,6 +163,8 @@ class _ProximityHandler extends TaskHandler {
         }
       }
       _lastMinRatio = minRatio;
+      _cachedZones = zonesSeen;
+      _updateZoneRatioFromCache();
 
       sendPort?.send({'type': 'distance', 'value': alarmDistance});
 
@@ -172,7 +212,9 @@ class ForegroundTaskService {
         buttons: [const NotificationButton(id: 'stop_alarm', text: 'Alarmı Durdur')],
       ),
       iosNotificationOptions: const IOSNotificationOptions(showNotification: true, playSound: false),
-      foregroundTaskOptions: const ForegroundTaskOptions(interval: 5000, isOnceEvent: false, autoRunOnBoot: false, allowWakeLock: true, allowWifiLock: true),
+      // Telefon yeniden başlatıldığında (pil bitip şarj sonrası, zorunlu
+      // yeniden başlatma vb.) izleme kendiliğinden devam etsin diye açık.
+      foregroundTaskOptions: const ForegroundTaskOptions(interval: 5000, isOnceEvent: false, autoRunOnBoot: true, allowWakeLock: true, allowWifiLock: true),
     );
   }
 
