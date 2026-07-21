@@ -15,19 +15,56 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameCtrl = TextEditingController();
+  final _usernameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
   String? _role;
   bool _saving = false;
   bool _disguise = false;
+  bool _obscurePassword = true;
   String? _error;
 
   Future<void> _submit() async {
     final name = _nameCtrl.text.trim();
-    if (name.isEmpty) { setState(() => _error = 'İsim gerekli.'); return; }
-    if (_role == null) { setState(() => _error = 'Rol seçmelisin.'); return; }
+    final username = _usernameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text;
+    if (username.isEmpty) { setState(() => _error = 'Kullanıcı adı gerekli.'); return; }
+    if (password.length < 4) { setState(() => _error = 'Şifre en az 4 karakter olmalı.'); return; }
     setState(() { _saving = true; _error = null; });
     try {
+      // Aynı kullanıcı adı/e-posta ile daha önce kayıt olunmuşsa (ör. uygulama
+      // silinip tekrar kurulduğunda) yeni bir cihaz oluşturmak yerine mevcut
+      // hesaba giriş yapılır — böylece admin panelinde kopya kayıt oluşmaz.
+      var account = await LocationService.findAccountByLogin(username);
+      account ??= email.isNotEmpty ? await LocationService.findAccountByLogin(email) : null;
+
+      if (account != null) {
+        final hash = LocationService.hashPassword(account.username, password);
+        if (hash != account.passwordHash) {
+          setState(() { _error = 'Bu kullanıcı adı/e-posta zaten kayıtlı ama şifre yanlış.'; _saving = false; });
+          return;
+        }
+        final p = await SharedPreferences.getInstance();
+        await p.setString('device_id', account.deviceId);
+        await p.setString('device_name', account.name);
+        await p.setString('device_role', account.role);
+        if (!mounted) return;
+        Navigator.pushReplacement(context, PageRouteBuilder(
+          pageBuilder: (_, a, __) => MonitorScreen(deviceId: account!.deviceId, name: account.name, role: account.role),
+          transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
+          transitionDuration: const Duration(milliseconds: 400),
+        ));
+        return;
+      }
+
+      if (name.isEmpty) { setState(() { _error = 'İsim gerekli.'; _saving = false; }); return; }
+      if (_role == null) { setState(() { _error = 'Rol seçmelisin.'; _saving = false; }); return; }
+
       final deviceId = LocationService.generateDeviceId();
-      await LocationService.registerDevice(deviceId, name, _role!);
+      final passwordHash = LocationService.hashPassword(username, password);
+      await LocationService.registerDevice(deviceId, name, _role!,
+          username: username, email: email.isNotEmpty ? email : null, passwordHash: passwordHash);
       final p = await SharedPreferences.getInstance();
       await p.setString('device_id', deviceId);
       await p.setString('device_name', name);
@@ -49,7 +86,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   @override
-  void dispose() { _nameCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _nameCtrl.dispose();
+    _usernameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  Widget _buildField(TextEditingController ctrl, String hint, {bool obscure = false, TextInputType? keyboardType, Widget? suffix}) => TextField(
+    controller: ctrl,
+    obscureText: obscure,
+    keyboardType: keyboardType,
+    style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 15),
+    decoration: InputDecoration(
+      hintText: hint,
+      hintStyle: GoogleFonts.inter(color: AppColors.textDisabled),
+      filled: true, fillColor: AppColors.surface,
+      suffixIcon: suffix,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.roleA.withOpacity(0.6))),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -72,6 +132,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         const SizedBox(height: 12),
         Text('Bu bilgiler bir kez girilir. Cihaz eşleştirmesi ve mesafe\nayarları yönetici tarafından web panelinden yapılır.',
             style: GoogleFonts.inter(fontSize: 14, color: AppColors.textSecondary, height: 1.6)),
+        const SizedBox(height: 10),
+        Text('Uygulamayı silip tekrar kurarsan, aynı kullanıcı adı/e-posta ve şifreyle giriş yaparak eski cihazına devam edebilirsin — yeni kayıt oluşmaz.',
+            style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.5)),
         const SizedBox(height: 36),
         Text('İSİM', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
         const SizedBox(height: 12),
@@ -88,6 +151,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.roleA.withOpacity(0.6))),
           ),
         ),
+        const SizedBox(height: 24),
+        Text('KULLANICI ADI', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
+        const SizedBox(height: 12),
+        _buildField(_usernameCtrl, 'Örn. ahmet34'),
+        const SizedBox(height: 20),
+        Text('E-POSTA (opsiyonel, giriş için de kullanılabilir)', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 1)),
+        const SizedBox(height: 12),
+        _buildField(_emailCtrl, 'ornek@mail.com', keyboardType: TextInputType.emailAddress),
+        const SizedBox(height: 20),
+        Text('ŞİFRE', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
+        const SizedBox(height: 12),
+        _buildField(_passwordCtrl, 'En az 4 karakter', obscure: _obscurePassword, suffix: IconButton(
+          icon: Icon(_obscurePassword ? Icons.visibility_rounded : Icons.visibility_off_rounded, color: AppColors.textMuted, size: 20),
+          onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+        )),
         const SizedBox(height: 32),
         Text('ROLÜNÜ SEÇ', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
         const SizedBox(height: 12),
@@ -104,6 +182,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           subtitle: 'Takip edilen kişi. Ayar değiştiremez.',
           onTap: () => setState(() => _role = kRoleTracked),
         ),
+        const SizedBox(height: 8),
+        Text('Not: Girdiğin kullanıcı adı/e-posta zaten kayıtlıysa ve şifre doğruysa, rol seçimi dikkate alınmadan doğrudan mevcut hesabına giriş yapılır.',
+            style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled, height: 1.4)),
         if (_role == kRoleProtected) ...[
           const SizedBox(height: 16),
           GestureDetector(

@@ -215,9 +215,10 @@
 
   <div class="card">
     <h2>Kayıtlı Cihazlar</h2>
+    <small class="hint" style="margin-bottom:8px;">Uygulama artık kullanıcı adı/e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
     <table>
-      <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Pil</th><th>Eşleşme</th></tr></thead>
-      <tbody id="devicesBody"><tr><td class="empty" colspan="5">Yükleniyor…</td></tr></tbody>
+      <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Pil</th><th>Eşleşme</th><th></th></tr></thead>
+      <tbody id="devicesBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
     </table>
   </div>
 
@@ -595,7 +596,7 @@ function render() {
 
   const body = document.getElementById('devicesBody');
   if (ids.length === 0) {
-    body.innerHTML = '<tr><td class="empty" colspan="5">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</td></tr>';
+    body.innerHTML = '<tr><td class="empty" colspan="6">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</td></tr>';
   } else {
     body.innerHTML = ids.map(id => {
       const d = devices[id];
@@ -603,11 +604,12 @@ function render() {
       const partners = partnerNames(id);
       const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 20 ? 'low' : ''}">🔋 ${d.battery}%</span>` : '<span class="batt">—</span>';
       return `<tr>
-        <td>${escapeHtml(d.name || '—')}</td>
+        <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
         <td><span class="dot ${online ? 'on' : 'off'}"></span>${online ? 'Çevrimiçi' : 'Çevrimdışı'}</td>
         <td>${batt}</td>
         <td>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
+        <td><button class="secondary" onclick="deleteDevice('${id}')">Sil</button></td>
       </tr>`;
     }).join('');
   }
@@ -693,6 +695,20 @@ async function removePair(pairId) {
   const p = pairs[pairId];
   if (!p) return;
   await deletePath(`pairs/${pairId}`);
+  await refresh();
+}
+
+async function deleteDevice(deviceId) {
+  const d = devices[deviceId];
+  if (!d) return;
+  const partners = partnerNames(deviceId);
+  const warn = partners.length ? `\n\nBu cihaz ${partners.length} eşleşmede yer alıyor, bunlar da silinecek.` : '';
+  if (!confirm(`"${d.name || deviceId}" cihazını silmek istediğine emin misin?${warn}`)) return;
+  for (const pid of pairIdsForDevice(deviceId)) {
+    await deletePath(`pairs/${pid}`);
+  }
+  await deletePath(`devices/${deviceId}`);
+  await deletePath(`locations/${deviceId}`);
   await refresh();
 }
 

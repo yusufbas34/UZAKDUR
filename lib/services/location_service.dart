@@ -1,7 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
+
+class DeviceAccount {
+  final String deviceId;
+  final String name;
+  final String role;
+  final String username;
+  final String passwordHash;
+  const DeviceAccount({
+    required this.deviceId,
+    required this.name,
+    required this.role,
+    required this.username,
+    required this.passwordHash,
+  });
+}
 
 class LocationData {
   final double lat;
@@ -123,13 +140,62 @@ class LocationService {
   }
 
   // --- Device registry ---
-  static Future<void> registerDevice(String deviceId, String name, String role) =>
+  // Şifre asla düz metin tutulmaz; kullanıcı adına bağlı basit bir tuzla
+  // (salt) hash'lenir. Firebase kuralları herkese açık okuma izni verdiği
+  // için bu, kurumsal düzeyde değil ama en azından düz metin şifre
+  // sızıntısını ve basit hash eşleşmesini önleyen asgari bir korumadır.
+  static String hashPassword(String username, String password) {
+    final salted = '${username.trim().toLowerCase()}::$password::uzakdur-v2';
+    return sha256.convert(utf8.encode(salted)).toString();
+  }
+
+  static Future<void> registerDevice(
+    String deviceId,
+    String name,
+    String role, {
+    required String username,
+    String? email,
+    required String passwordHash,
+  }) =>
       _db.child('devices/$deviceId').update({
         'name': name,
         'role': role,
+        'username': username,
+        if (email != null && email.isNotEmpty) 'email': email,
+        'passwordHash': passwordHash,
         'online': false,
         'createdAt': ServerValue.timestamp,
       });
+
+  // Cihaz silinip yeniden kurulduğunda aynı kullanıcı adı/e-posta + şifre
+  // ile tekrar kayıt yerine mevcut hesaba giriş yapılabilsin diye tüm
+  // devices koleksiyonu taranır (küçük ölçek için pahalı değil).
+  static Future<DeviceAccount?> findAccountByLogin(String usernameOrEmail) async {
+    final needle = usernameOrEmail.trim().toLowerCase();
+    if (needle.isEmpty) return null;
+    final snap = await _db.child('devices').get();
+    if (!snap.exists || snap.value == null) return null;
+    final v = snap.value;
+    if (v is! Map) return null;
+    for (final entry in v.entries) {
+      final data = entry.value;
+      if (data is! Map) continue;
+      final username = (data['username'] as String?)?.trim().toLowerCase();
+      final email = (data['email'] as String?)?.trim().toLowerCase();
+      final hash = data['passwordHash'] as String?;
+      if (hash == null) continue;
+      if (username == needle || (email != null && email.isNotEmpty && email == needle)) {
+        return DeviceAccount(
+          deviceId: entry.key as String,
+          name: (data['name'] as String?) ?? '',
+          role: (data['role'] as String?) ?? '',
+          username: (data['username'] as String?) ?? usernameOrEmail,
+          passwordHash: hash,
+        );
+      }
+    }
+    return null;
+  }
 
   static Future<void> setOnline(String deviceId, bool online) =>
       _db.child('devices/$deviceId').update({'online': online, 'ts': DateTime.now().millisecondsSinceEpoch});

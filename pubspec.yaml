@@ -23,6 +23,7 @@ dependencies:
   audioplayers: ^5.2.1
   battery_plus: ^5.0.3
   url_launcher: ^6.2.4
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:
