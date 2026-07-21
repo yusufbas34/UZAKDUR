@@ -277,11 +277,23 @@ function canonicalPairIds() {
   );
 }
 
+function isValidLogEntry(e) {
+  return !!e && typeof e === 'object' && typeof e.ts === 'number';
+}
+
 function flatEvents() {
   const out = [];
   for (const pid of Object.keys(alarmLogAll)) {
-    const entries = alarmLogAll[pid] || {};
-    for (const id of Object.keys(entries)) out.push(Object.assign({ pairId: pid, id }, entries[id]));
+    const entries = alarmLogAll[pid];
+    // Skips legacy pre-pairing alarm_log entries (written flat at the root
+    // before the pairId/entryId nesting existed) — those show up here as a
+    // leaf object whose "children" are just field values, not real entries.
+    if (!entries || typeof entries !== 'object') continue;
+    for (const id of Object.keys(entries)) {
+      const e = entries[id];
+      if (!isValidLogEntry(e)) continue;
+      out.push(Object.assign({ pairId: pid, id }, e));
+    }
   }
   out.sort((a, b) => b.ts - a.ts);
   return out;
@@ -444,12 +456,27 @@ async function rejectRequest(pairId) {
   await refresh();
 }
 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+function showNotif(title, opts) {
+  if (!notifEnabled) return;
+  if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
+    navigator.serviceWorker.ready
+      .then(reg => reg.showNotification(title, opts))
+      .catch(() => { try { new Notification(title, opts); } catch (_) {} });
+  } else if ('Notification' in window) {
+    try { new Notification(title, opts); } catch (_) {}
+  }
+}
+
 function enableNotifications() {
   if (!('Notification' in window)) { alert('Bu tarayıcı bildirimleri desteklemiyor.'); return; }
   Notification.requestPermission().then(p => {
     notifEnabled = p === 'granted';
     document.getElementById('notifBtn').textContent = notifEnabled ? '🔔 Bildirimler Açık' : '🔕 İzin verilmedi';
-    if (notifEnabled) new Notification('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
+    if (notifEnabled) showNotif('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
   });
 }
 
@@ -478,12 +505,10 @@ function checkLiveEvents() {
   if (newest.length === 0) return;
   lastSeenTs = Math.max(...newest.map(e => e.ts));
   playBeep();
-  if (notifEnabled) {
-    const e = newest[0];
-    new Notification(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
-      body: `${pairLabel(e.pairId)} — ${eventLine(e)}`,
-    });
-  }
+  const e = newest[0];
+  showNotif(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
+    body: `${pairLabel(e.pairId)} — ${eventLine(e)}`,
+  });
 }
 
 function checkTamper() {
@@ -662,7 +687,7 @@ async function loadDetailHistory(pairId) {
     const log = await fetchJSON(`alarm_log/${pairId}`);
     if (openPairId !== pairId) return;
     if (!log) { el.innerHTML = '<div class="empty">Henüz alarm kaydı yok.</div>'; return; }
-    const entries = Object.values(log).sort((a, b) => b.ts - a.ts).slice(0, 30);
+    const entries = Object.values(log).filter(isValidLogEntry).sort((a, b) => b.ts - a.ts).slice(0, 30);
     el.innerHTML = entries.map(e => {
       const name = devices[e.byDeviceId]?.name || (e.byDeviceId === 'admin' ? 'Sistem' : '(silinmiş cihaz)');
       const date = new Date(e.ts).toLocaleString('tr-TR');
@@ -684,7 +709,7 @@ async function exportPdf() {
   const pName = devices[p.protectedDeviceId]?.name || '?';
   const tName = devices[p.trackedDeviceId]?.name || '?';
   const log = await fetchJSON(`alarm_log/${openPairId}`);
-  const entries = log ? Object.values(log).sort((a, b) => b.ts - a.ts) : [];
+  const entries = log ? Object.values(log).filter(isValidLogEntry).sort((a, b) => b.ts - a.ts) : [];
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   doc.setFontSize(16); doc.text('UZAKDUR — Alarm Geçmişi Raporu', 14, 18);
