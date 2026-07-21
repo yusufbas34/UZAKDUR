@@ -171,6 +171,15 @@
   .feed-tab.normal.active { background:var(--safe-soft); color:var(--safe); border-color:rgba(22,162,94,.4); }
   .feed-tab.normal.active .cnt { background:var(--safe); color:#fff; }
   #liveFeedPanel { margin-top:14px; }
+  .main-tabs { display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .main-tab {
+    background:transparent; color:var(--text2); border:none; box-shadow:none; border-radius:0;
+    padding:12px 16px; font-size:13.5px; display:flex; align-items:center; gap:8px;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  .main-tab:hover { background:var(--surface-hover); filter:none; transform:none; }
+  .main-tab.active { color:var(--text); border-bottom-color:var(--danger); font-weight:800; }
+  .main-tab .req-dot { background:var(--danger); color:#fff; border-radius:100px; padding:1px 8px; font-size:11px; font-weight:800; }
 </style>
 </head>
 <body>
@@ -204,72 +213,88 @@
     <div class="stat-card"><div class="num" id="statAlarmsToday" style="color:var(--danger);">0</div><div class="lbl">Bugün Alarm</div></div>
   </div>
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;">
-      <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
-      <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
+  <div class="main-tabs">
+    <button class="main-tab" id="mainTab_ops" onclick="showMainTab('ops')">🎯 Operasyon</button>
+    <button class="main-tab" id="mainTab_pairs" onclick="showMainTab('pairs')">🔗 Eşleşmeler</button>
+    <button class="main-tab" id="mainTab_requests" onclick="showMainTab('requests')">📋 Talepler <span class="req-dot hidden" id="requestsDot">0</span></button>
+    <button class="main-tab" id="mainTab_devices" onclick="showMainTab('devices')">📱 Cihazlar</button>
+  </div>
+
+  <div id="tabPanel_ops">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
+        <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
+      </div>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Durum</th><th>Vaka</th><th>Mesafe / Eşik</th><th>Son Olay</th><th>Pil</th><th>Cihazlar</th></tr></thead>
+        <tbody id="opsBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
+      </table>
+      </div>
     </div>
-    <div style="overflow-x:auto;">
-    <table>
-      <thead><tr><th>Durum</th><th>Vaka</th><th>Mesafe / Eşik</th><th>Son Olay</th><th>Pil</th><th>Cihazlar</th></tr></thead>
-      <tbody id="opsBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
-    </table>
+
+    <div class="card">
+      <h2>Canlı Akış</h2>
+      <div class="feed-tabs">
+        <button class="feed-tab urgent" id="feedTab_urgent" onclick="toggleLiveFeedTab('urgent')">🆘 Acil! <span class="cnt" id="feedCnt_urgent">0</span></button>
+        <button class="feed-tab important" id="feedTab_important" onclick="toggleLiveFeedTab('important')">⚠ Önemli! <span class="cnt" id="feedCnt_important">0</span></button>
+        <button class="feed-tab normal" id="feedTab_normal" onclick="toggleLiveFeedTab('normal')">ℹ Normal! <span class="cnt" id="feedCnt_normal">0</span></button>
+      </div>
+      <div id="liveFeedPanel" class="hidden">
+        <div id="liveFeed" class="empty">Henüz olay yok.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🗺️ Tüm Vakalar Haritası</h2>
+      <div id="allCasesMap"></div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>🗺️ Tüm Vakalar Haritası</h2>
-    <div id="allCasesMap"></div>
-  </div>
-
-  <div class="card">
-    <h2>Canlı Akış</h2>
-    <div class="feed-tabs">
-      <button class="feed-tab urgent" id="feedTab_urgent" onclick="toggleLiveFeedTab('urgent')">🆘 Acil! <span class="cnt" id="feedCnt_urgent">0</span></button>
-      <button class="feed-tab important" id="feedTab_important" onclick="toggleLiveFeedTab('important')">⚠ Önemli! <span class="cnt" id="feedCnt_important">0</span></button>
-      <button class="feed-tab normal" id="feedTab_normal" onclick="toggleLiveFeedTab('normal')">ℹ Normal! <span class="cnt" id="feedCnt_normal">0</span></button>
+  <div id="tabPanel_pairs" class="hidden">
+    <div class="card">
+      <h2>Yeni Eşleştirme Oluştur</h2>
+      <div class="row">
+        <select id="selProtected"></select>
+        <span class="arrow">⇄</span>
+        <select id="selTracked"></select>
+        <input type="number" id="newThreshold" value="100" min="10" max="5000" style="width:90px;" title="Alarm eşiği (metre)"/>
+        <span style="color:var(--muted); font-size:12px;">metre</span>
+        <button id="pairBtn" onclick="createPair()">Eşleştir</button>
+      </div>
+      <small class="hint">Bir korunan en fazla 4 uzaklaştırılan, bir uzaklaştırılan en fazla 4 korunan ile eşleştirilebilir. Aynı ikili sadece bir kez eşleştirilebilir.</small>
     </div>
-    <div id="liveFeedPanel" class="hidden">
-      <div id="liveFeed" class="empty">Henüz olay yok.</div>
+
+    <div class="card">
+      <h2>Aktif Eşleşmeler</h2>
+      <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
     </div>
   </div>
 
-  <div class="card">
-    <h2>Kayıtlı Cihazlar</h2>
-    <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
-    <table>
-      <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Pil</th><th>Eşleşme</th><th></th></tr></thead>
-      <tbody id="devicesBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>🔐 Şifre Sıfırlama Talepleri</h2>
-    <div id="resetRequestsList" class="empty">Bekleyen talep yok.</div>
-  </div>
-
-  <div class="card">
-    <h2>👤 Acil Kişi Talepleri</h2>
-    <div id="contactReqGlobalList" class="empty">Bekleyen talep yok.</div>
-  </div>
-
-  <div class="card">
-    <h2>Yeni Eşleştirme Oluştur</h2>
-    <div class="row">
-      <select id="selProtected"></select>
-      <span class="arrow">⇄</span>
-      <select id="selTracked"></select>
-      <input type="number" id="newThreshold" value="100" min="10" max="5000" style="width:90px;" title="Alarm eşiği (metre)"/>
-      <span style="color:var(--muted); font-size:12px;">metre</span>
-      <button id="pairBtn" onclick="createPair()">Eşleştir</button>
+  <div id="tabPanel_requests" class="hidden">
+    <div class="card">
+      <h2>🔐 Şifre Sıfırlama Talepleri</h2>
+      <div id="resetRequestsList" class="empty">Bekleyen talep yok.</div>
     </div>
-    <small class="hint">Bir korunan en fazla 4 uzaklaştırılan, bir uzaklaştırılan en fazla 4 korunan ile eşleştirilebilir. Aynı ikili sadece bir kez eşleştirilebilir.</small>
+
+    <div class="card">
+      <h2>👤 Acil Kişi Talepleri</h2>
+      <div id="contactReqGlobalList" class="empty">Bekleyen talep yok.</div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>Aktif Eşleşmeler</h2>
-    <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
+  <div id="tabPanel_devices" class="hidden">
+    <div class="card">
+      <h2>Kayıtlı Cihazlar</h2>
+      <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
+      <table>
+        <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Pil</th><th>Eşleşme</th><th></th></tr></thead>
+        <tbody id="devicesBody"><tr><td class="empty" colspan="6">Yükleniyor…</td></tr></tbody>
+      </table>
+    </div>
   </div>
+
   <div style="text-align:center; color:var(--muted); font-size:11px; padding:8px 0 4px;">Yusuf BAŞ tarafından üretilmiştir</div>
 </div>
 </div>
@@ -557,6 +582,28 @@ function feedSeverity(e) {
   return 'normal';
 }
 
+const MAIN_TABS = ['ops', 'pairs', 'requests', 'devices'];
+
+function showMainTab(name) {
+  MAIN_TABS.forEach(t => {
+    document.getElementById(`tabPanel_${t}`).classList.toggle('hidden', t !== name);
+    document.getElementById(`mainTab_${t}`).classList.toggle('active', t === name);
+  });
+  localStorage.setItem('uzakdur_admin_tab', name);
+  // Harita, gizliyken oluşturulmuşsa Leaflet boyutu yanlış hesaplayabilir;
+  // Operasyon sekmesine her geçişte düzeltilsin.
+  if (name === 'ops' && allCasesMapObj) setTimeout(() => allCasesMapObj.invalidateSize(), 0);
+}
+
+function updateRequestsDot() {
+  const resetCount = Object.keys(devices).filter(id => devices[id].passwordResetRequest).length;
+  const contactCount = Object.keys(devices).reduce((sum, id) => sum + Object.keys(deviceContactRequests(id)).length, 0);
+  const total = resetCount + contactCount;
+  const dot = document.getElementById('requestsDot');
+  dot.textContent = total;
+  dot.classList.toggle('hidden', total === 0);
+}
+
 let liveFeedTab = null;
 
 function toggleLiveFeedTab(sev) {
@@ -684,6 +731,7 @@ function render() {
   renderResetRequests();
   renderContactRequestsGlobal();
   renderLiveFeed();
+  updateRequestsDot();
 
   const body = document.getElementById('devicesBody');
   if (ids.length === 0) {
@@ -1275,6 +1323,8 @@ async function saveDetailThreshold() {
 
 let pollHandle = null;
 function boot() {
+  const savedTab = localStorage.getItem('uzakdur_admin_tab');
+  showMainTab(MAIN_TABS.includes(savedTab) ? savedTab : 'ops');
   refresh();
   if (!pollHandle) pollHandle = setInterval(refresh, 3000);
 }
