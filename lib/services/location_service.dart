@@ -37,13 +37,15 @@ class EmergencyContact {
   final String name;
   final String? phone;
   final String? email;
-  const EmergencyContact({required this.id, required this.name, this.phone, this.email});
+  final String type; // 'family' (yakın) veya 'authority' (yetkili/polis)
+  const EmergencyContact({required this.id, required this.name, this.phone, this.email, this.type = 'family'});
 
   factory EmergencyContact.fromMap(String id, Map<dynamic, dynamic> map) => EmergencyContact(
         id: id,
         name: (map['name'] as String?) ?? '',
         phone: map['phone'] as String?,
         email: map['email'] as String?,
+        type: (map['type'] as String?) ?? 'family',
       );
 }
 

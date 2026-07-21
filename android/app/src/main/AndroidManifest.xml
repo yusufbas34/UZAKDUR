@@ -47,11 +47,35 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true">
             <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
+        </activity>
+
+        <!-- Launcher girişleri activity-alias üzerinden yapılır ki simge/isim çalışırken değiştirilebilsin -->
+        <activity-alias
+            android:name=".RealAlias"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="UZAKDUR">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <!-- Kılık değiştirme: Korunan rolü isterse uygulama simgesi/ismi bununla değiştirilir -->
+        <activity-alias
+            android:name=".DisguiseAlias"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_notes"
+            android:label="@string/disguise_label">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"

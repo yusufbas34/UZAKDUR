@@ -8,10 +8,12 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:intl/intl.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/roles.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../services/foreground_task_service.dart';
+import '../services/disguise_service.dart';
 import '../theme/app_theme.dart';
 
 class LogEntry {
@@ -41,6 +43,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   String? _alarmZoneLabel;
   String? _errorText;
   bool _panicSending = false;
+  bool _disguised = false;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
   final _battery = Battery();
@@ -79,6 +82,26 @@ class _MonitorScreenState extends State<MonitorScreen>
     WidgetsBinding.instance.addObserver(this);
     ForegroundTaskService.init();
     _start();
+    if (_isProtected) _loadDisguiseState();
+  }
+
+  Future<void> _loadDisguiseState() async {
+    final p = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _disguised = p.getBool('app_disguised') ?? false);
+  }
+
+  Future<void> _toggleDisguise() async {
+    final next = !_disguised;
+    if (next) {
+      await DisguiseService.apply();
+    } else {
+      await DisguiseService.remove();
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('app_disguised', next);
+    if (!mounted) return;
+    setState(() => _disguised = next);
   }
 
   Future<void> _start() async {
@@ -220,21 +243,38 @@ class _MonitorScreenState extends State<MonitorScreen>
     HapticFeedback.heavyImpact();
     try {
       await LocationService.writeAlarmLog(_pairId!, widget.deviceId, 0, type: 'panic');
-      final emails = (_pair?.emergencyContacts ?? const [])
+      final contacts = _pair?.emergencyContacts ?? const [];
+      final loc = _myLocation;
+      final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
+
+      String emailsOf(bool authority) => contacts
+          .where((c) => (c.type == 'authority') == authority)
           .map((c) => c.email)
           .whereType<String>()
           .where((e) => e.trim().isNotEmpty)
-          .toList();
-      if (emails.isNotEmpty) {
-        final loc = _myLocation;
-        final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
-        final uri = Uri(scheme: 'mailto', path: emails.join(','),
+          .join(',');
+
+      final familyEmails = emailsOf(false);
+      if (familyEmails.isNotEmpty) {
+        final uri = Uri(scheme: 'mailto', path: familyEmails,
             queryParameters: {'subject': 'ACİL — UZAKDUR Panik', 'body': '${widget.name} panik butonuna bastı.\nKonum: $locText'});
         if (await canLaunchUrl(uri)) await launchUrl(uri);
       }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Panik sinyali gönderildi'), backgroundColor: AppColors.danger));
+
+      final authorityEmails = emailsOf(true);
+      if (authorityEmails.isNotEmpty) {
+        final uri = Uri(scheme: 'mailto', path: authorityEmails, queryParameters: {
+          'subject': 'ACİL YARDIM TALEBİ — UZAKDUR Panik Bildirimi',
+          'body': 'Resmi bildirim: ${widget.name} isimli kişi, UZAKDUR uygulamasındaki acil durum butonuna basmıştır.\n\n'
+              'Bildirim zamanı: ${DateTime.now()}\n'
+              'Son bilinen konum: $locText\n\n'
+              'Lütfen ilgili birimlerle irtibata geçerek yardım talebini değerlendiriniz.',
+        });
+        if (await canLaunchUrl(uri)) await launchUrl(uri);
       }
+      // Bilinçli olarak ekranda görünür bir onay yok: yanında biri varken
+      // panik butonunun basıldığının anlaşılmaması için sadece titreşimle bildirilir.
+      HapticFeedback.heavyImpact();
     } finally {
       if (mounted) setState(() => _panicSending = false);
     }
@@ -444,6 +484,10 @@ class _MonitorScreenState extends State<MonitorScreen>
         _IconBtn(icon: Icons.rule_rounded, onTap: _requestDistance),
         const SizedBox(width: 8),
         _IconBtn(icon: Icons.music_note_rounded, onTap: _pickAlarmSound),
+        const SizedBox(width: 8),
+      ],
+      if (_isProtected) ...[
+        _IconBtn(icon: _disguised ? Icons.visibility_off_rounded : Icons.visibility_rounded, onTap: _toggleDisguise),
         const SizedBox(width: 10),
       ],
       _OnlineDot(label: 'Ben', online: _isRunning, color: _roleColor),

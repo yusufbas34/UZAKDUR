@@ -263,7 +263,7 @@
     <div id="zoneList"></div>
 
     <h2 style="margin-top:20px;">Acil Durum Kişileri</h2>
-    <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında korunan kişinin telefonu, e-postası olan tüm kişilere tek bir e-posta taslağı açar (SMS devre dışı).</small>
+    <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında e-postası olan kişilere taslak açılır. "Yakın" kişiler kısa bir bildirim, "Yetkili/Polis" olarak işaretlenenler ise daha resmi, ayrıntılı bir metin alır (SMS devre dışı).</small>
     <div id="contactList"></div>
     <div class="row" style="margin-top:10px;">
       <input type="text" id="ecName" placeholder="İsim" style="flex:1;"/>
@@ -271,6 +271,10 @@
     </div>
     <div class="row" style="margin-top:8px;">
       <input type="email" id="ecEmail" placeholder="E-posta" style="flex:1;"/>
+      <select id="ecType" style="width:150px;">
+        <option value="family">👤 Yakın</option>
+        <option value="authority">🚓 Yetkili / Polis</option>
+      </select>
       <button onclick="addEmergencyContact()">+ Ekle</button>
     </div>
 
@@ -904,9 +908,10 @@ async function addEmergencyContact() {
   const name = document.getElementById('ecName').value.trim();
   const phone = document.getElementById('ecPhone').value.trim();
   const email = document.getElementById('ecEmail').value.trim();
+  const type = document.getElementById('ecType').value;
   if (!name && !phone && !email) return;
   const cid = genId();
-  await patchJSON(`pairs/${openPairId}/emergencyContacts/${cid}`, { name, phone, email });
+  await patchJSON(`pairs/${openPairId}/emergencyContacts/${cid}`, { name, phone, email, type });
   document.getElementById('ecName').value = '';
   document.getElementById('ecPhone').value = '';
   document.getElementById('ecEmail').value = '';
@@ -921,7 +926,7 @@ function renderContactList(pairId) {
   if (!p) return;
   const contacts = p.emergencyContacts ? Object.entries(p.emergencyContacts) : [];
   el.innerHTML = contacts.length
-    ? contacts.map(([cid, c]) => `<div class="hist-row"><span>👤 ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}</span><button class="secondary" onclick="deleteEmergencyContact('${pairId}','${cid}')">Sil</button></div>`).join('')
+    ? contacts.map(([cid, c]) => `<div class="hist-row"><span>${c.type === 'authority' ? '🚓' : '👤'} ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}${c.type === 'authority' ? ' <span class="badge" style="background:var(--warning);color:#fff;">Yetkili</span>' : ''}</span><button class="secondary" onclick="deleteEmergencyContact('${pairId}','${cid}')">Sil</button></div>`).join('')
     : '<div class="empty">Henüz acil durum kişisi eklenmedi.</div>';
 }
 

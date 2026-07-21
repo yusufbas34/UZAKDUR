@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/roles.dart';
 import '../services/location_service.dart';
+import '../services/disguise_service.dart';
 import '../theme/app_theme.dart';
 import 'monitor_screen.dart';
 
@@ -16,6 +17,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameCtrl = TextEditingController();
   String? _role;
   bool _saving = false;
+  bool _disguise = false;
   String? _error;
 
   Future<void> _submit() async {
@@ -30,6 +32,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       await p.setString('device_id', deviceId);
       await p.setString('device_name', name);
       await p.setString('device_role', _role!);
+      if (_role == kRoleProtected && _disguise) {
+        await DisguiseService.apply();
+        await p.setBool('app_disguised', true);
+      }
       if (!mounted) return;
       Navigator.pushReplacement(context, PageRouteBuilder(
         pageBuilder: (_, a, __) => MonitorScreen(deviceId: deviceId, name: name, role: _role!),
@@ -98,6 +104,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           subtitle: 'Takip edilen kişi. Ayar değiştiremez.',
           onTap: () => setState(() => _role = kRoleTracked),
         ),
+        if (_role == kRoleProtected) ...[
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: () => setState(() => _disguise = !_disguise),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _disguise ? AppColors.roleB.withOpacity(0.1) : AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _disguise ? AppColors.roleB.withOpacity(0.5) : AppColors.border),
+              ),
+              child: Row(children: [
+                Icon(_disguise ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                    color: _disguise ? AppColors.roleB : AppColors.textDisabled, size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Uygulama simgesini gizle', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text('Ana ekranda "Notlarım" adıyla, farklı bir simgeyle görünür. Daha sonra ayarlardan kapatabilirsin.',
+                      style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted, height: 1.4)),
+                ])),
+              ]),
+            ),
+          ),
+        ],
         if (_error != null) ...[
           const SizedBox(height: 16),
           Text(_error!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.danger)),
