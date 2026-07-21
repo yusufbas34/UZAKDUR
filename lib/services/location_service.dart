@@ -141,6 +141,7 @@ class LocationService {
     String role, {
     required String email,
     required String passwordHash,
+    bool kvkkAccepted = false,
   }) =>
       _db.child('devices/$deviceId').update({
         'name': name,
@@ -149,6 +150,7 @@ class LocationService {
         'passwordHash': passwordHash,
         'online': false,
         'createdAt': ServerValue.timestamp,
+        if (kvkkAccepted) 'kvkkAcceptedAt': ServerValue.timestamp,
       });
 
   // Her e-posta yalnızca bir cihaza ait olabilir; cihaz silinip yeniden

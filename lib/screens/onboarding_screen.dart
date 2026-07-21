@@ -5,6 +5,7 @@ import '../models/roles.dart';
 import '../services/location_service.dart';
 import '../services/disguise_service.dart';
 import '../theme/app_theme.dart';
+import '../kvkk_consent_text.dart';
 import 'monitor_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _disguise = false;
   bool _obscurePassword = true;
   bool _isLogin = false;
+  bool _kvkkAccepted = false;
   String? _error;
 
   Future<void> _submit() async {
@@ -84,10 +86,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       if (name.isEmpty) { setState(() { _error = 'İsim gerekli.'; _saving = false; }); return; }
       if (_role == null) { setState(() { _error = 'Rol seçmelisin.'; _saving = false; }); return; }
+      if (!_kvkkAccepted) { setState(() { _error = 'Devam etmek için KVKK Açık Rıza Metni\'ni okuyup onaylamalısın.'; _saving = false; }); return; }
 
       final deviceId = LocationService.generateDeviceId();
       final passwordHash = LocationService.hashPassword(email, password);
-      await LocationService.registerDevice(deviceId, name, _role!, email: email, passwordHash: passwordHash);
+      await LocationService.registerDevice(deviceId, name, _role!, email: email, passwordHash: passwordHash, kvkkAccepted: true);
       final p = await SharedPreferences.getInstance();
       await p.setString('device_id', deviceId);
       await p.setString('device_name', name);
@@ -172,6 +175,96 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
     emailCtrl.dispose();
     newPassCtrl.dispose();
+  }
+
+  Future<void> _showKvkkSheet() async {
+    final scrollCtrl = ScrollController();
+    bool readToEnd = false;
+    bool checked = _kvkkAccepted;
+    bool initChecked = false;
+    StateSetter? sheetSetState;
+
+    void markRead() {
+      if (!readToEnd) {
+        readToEnd = true;
+        sheetSetState?.call(() {});
+      }
+    }
+
+    scrollCtrl.addListener(() {
+      if (!readToEnd && scrollCtrl.hasClients &&
+          scrollCtrl.position.pixels >= scrollCtrl.position.maxScrollExtent - 24) {
+        markRead();
+      }
+    });
+
+    await showModalBottomSheet(
+      context: context, backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
+        sheetSetState = setSheet;
+        if (!initChecked) {
+          initChecked = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (scrollCtrl.hasClients && scrollCtrl.position.maxScrollExtent <= 0) markRead();
+          });
+        }
+        return SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.85,
+          child: Padding(
+            padding: EdgeInsets.only(left: 24, right: 24, top: 20, bottom: 20 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('KVKK Aydınlatma ve Açık Rıza Metni', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: AppColors.surfaceHigh, borderRadius: BorderRadius.circular(12)),
+                  child: Scrollbar(
+                    controller: scrollCtrl,
+                    child: SingleChildScrollView(
+                      controller: scrollCtrl,
+                      child: Text(kvkkConsentText, style: GoogleFonts.inter(fontSize: 12.5, color: AppColors.textSecondary, height: 1.6)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (!readToEnd)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text('Devam etmek için metni sonuna kadar kaydır.', style: GoogleFonts.inter(fontSize: 11.5, color: AppColors.textMuted)),
+                ),
+              GestureDetector(
+                onTap: readToEnd ? () => setSheet(() => checked = !checked) : null,
+                child: Opacity(
+                  opacity: readToEnd ? 1 : 0.4,
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Icon(checked ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                        color: checked ? AppColors.roleB : AppColors.textDisabled, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text('Okudum ve kişisel verilerimin işlenmesine açık rıza veriyorum.',
+                        style: GoogleFonts.inter(fontSize: 12.5, color: AppColors.textPrimary, height: 1.4))),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(width: double.infinity, child: GestureDetector(
+                onTap: () { setState(() => _kvkkAccepted = checked); Navigator.pop(ctx); },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(12)),
+                  alignment: Alignment.center,
+                  child: Text('Kapat', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+                ),
+              )),
+            ]),
+          ),
+        );
+      }),
+    );
+    scrollCtrl.dispose();
   }
 
   @override
@@ -338,6 +431,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ]),
           ),
         ],
+        const SizedBox(height: 20),
+        GestureDetector(
+          onTap: _showKvkkSheet,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _kvkkAccepted ? AppColors.roleB.withOpacity(0.1) : AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kvkkAccepted ? AppColors.roleB.withOpacity(0.5) : AppColors.border),
+            ),
+            child: Row(children: [
+              Icon(_kvkkAccepted ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                  color: _kvkkAccepted ? AppColors.roleB : AppColors.textDisabled, size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('KVKK Aydınlatma ve Açık Rıza Metni', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(_kvkkAccepted ? 'Okundu ve onaylandı.' : 'Devam etmeden önce okuyup onaylaman gerekiyor.',
+                    style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted, height: 1.4)),
+              ])),
+            ]),
+          ),
+        ),
         ],
         if (_error != null) ...[
           const SizedBox(height: 16),
