@@ -16,6 +16,7 @@ import '../services/notification_service.dart';
 import '../services/foreground_task_service.dart';
 import '../services/disguise_service.dart';
 import '../services/update_service.dart';
+import '../services/watchdog_service.dart';
 import '../theme/app_theme.dart';
 
 class LogEntry {
@@ -190,6 +191,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _reportBattery());
     _maybeShowBatteryDialog();
     _checkForUpdate();
+    WatchdogService.register().ignore();
 
     if (_isProtected) {
       _myContactsSub = LocationService.listenDeviceContacts(widget.deviceId, (contacts) {

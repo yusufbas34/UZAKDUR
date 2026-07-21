@@ -7,6 +7,7 @@ import 'firebase_options.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'services/notification_service.dart';
+import 'services/watchdog_service.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -19,6 +20,7 @@ void main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await NotificationService.init();
   await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+  await WatchdogService.init();
   runApp(const UzakDurApp());
 }
 
