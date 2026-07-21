@@ -228,6 +228,11 @@
   </div>
 
   <div class="card">
+    <h2>👤 Acil Kişi Talepleri</h2>
+    <div id="contactReqGlobalList" class="empty">Bekleyen talep yok.</div>
+  </div>
+
+  <div class="card">
     <h2>Yeni Eşleştirme Oluştur</h2>
     <div class="row">
       <select id="selProtected"></select>
@@ -614,6 +619,7 @@ function render() {
   renderOpsBoard(pairIds);
   renderAllCasesMap(pairIds);
   renderResetRequests();
+  renderContactRequestsGlobal();
 
   const feedEl = document.getElementById('liveFeed');
   const feed = flatEvents().slice(0, 12);
@@ -696,16 +702,6 @@ function render() {
           <button class="safe" onclick="approveRequest('${pid}', ${req.value})">Onayla</button>
           <button class="secondary" onclick="rejectRequest('${pid}')">Reddet</button>
         </div>` : ''}
-        ${Object.entries(deviceContactRequests(p.protectedDeviceId)).map(([rid, r]) => {
-          const label = r.type === 'remove'
-            ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
-            : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi`;
-          return `<div class="row" style="margin-top:12px;">
-            <span class="req">⚠ ${label}</span>
-            <button class="safe" onclick="approveContactRequest('${p.protectedDeviceId}','${rid}')">Onayla</button>
-            <button class="secondary" onclick="rejectContactRequest('${p.protectedDeviceId}','${rid}')">Reddet</button>
-          </div>`;
-        }).join('')}
       </div>`;
     }).join('');
   }
@@ -781,6 +777,31 @@ async function approvePasswordReset(deviceId) {
 async function rejectPasswordReset(deviceId) {
   await patchJSON(`devices/${deviceId}`, { passwordResetRequest: null });
   await refresh();
+}
+
+function renderContactRequestsGlobal() {
+  const el = document.getElementById('contactReqGlobalList');
+  const rows = [];
+  Object.keys(devices).forEach(deviceId => {
+    Object.entries(deviceContactRequests(deviceId)).forEach(([rid, r]) => {
+      const label = r.type === 'remove'
+        ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
+        : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi`;
+      rows.push({ deviceId, rid, ts: r.ts, label });
+    });
+  });
+  rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  el.innerHTML = rows.length
+    ? rows.map(({ deviceId, rid, ts, label }) => {
+        const dName = devices[deviceId]?.name || deviceId;
+        return `<div class="hist-row"><span>👤 <b>${escapeHtml(dName)}</b> — ${label} <span style="color:var(--muted); font-size:11px;">(${timeAgo(ts)})</span></span>
+          <span class="row" style="gap:8px;">
+            <button class="safe" onclick="approveContactRequest('${deviceId}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${deviceId}','${rid}')">Reddet</button>
+          </span>
+        </div>`;
+      }).join('')
+    : '<div class="empty">Bekleyen talep yok.</div>';
 }
 
 async function deleteDevice(deviceId) {
