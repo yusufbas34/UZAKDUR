@@ -15,6 +15,36 @@ class LocationData {
       );
 }
 
+class ZoneData {
+  final String id;
+  final String label;
+  final double lat;
+  final double lon;
+  final double radius;
+  const ZoneData({required this.id, required this.label, required this.lat, required this.lon, required this.radius});
+
+  factory ZoneData.fromMap(String id, Map<dynamic, dynamic> map) => ZoneData(
+        id: id,
+        label: (map['label'] as String?) ?? 'Bölge',
+        lat: (map['lat'] as num).toDouble(),
+        lon: (map['lon'] as num).toDouble(),
+        radius: ((map['radius'] as num?) ?? 100).toDouble(),
+      );
+}
+
+class EmergencyContact {
+  final String name;
+  final String? phone;
+  final String? email;
+  const EmergencyContact({required this.name, this.phone, this.email});
+
+  factory EmergencyContact.fromMap(Map<dynamic, dynamic> map) => EmergencyContact(
+        name: (map['name'] as String?) ?? '',
+        phone: map['phone'] as String?,
+        email: map['email'] as String?,
+      );
+}
+
 class PairData {
   final String id;
   final String protectedDeviceId;
@@ -22,6 +52,8 @@ class PairData {
   final double threshold;
   final String alarmSound;
   final double? distanceRequest;
+  final List<ZoneData> zones;
+  final EmergencyContact? emergencyContact;
   const PairData({
     required this.id,
     required this.protectedDeviceId,
@@ -29,6 +61,8 @@ class PairData {
     required this.threshold,
     required this.alarmSound,
     this.distanceRequest,
+    this.zones = const [],
+    this.emergencyContact,
   });
 
   factory PairData.fromMap(String id, Map<dynamic, dynamic> map) => PairData(
@@ -39,6 +73,17 @@ class PairData {
         alarmSound: (map['alarmSound'] as String?) ?? 'siren',
         distanceRequest: (map['distanceRequest'] as Map?)?['value'] != null
             ? ((map['distanceRequest']['value'] as num).toDouble())
+            : null,
+        zones: (map['zones'] as Map?)
+                ?.entries
+                .map((e) {
+                  try { return ZoneData.fromMap(e.key as String, e.value as Map); } catch (_) { return null; }
+                })
+                .whereType<ZoneData>()
+                .toList() ??
+            const [],
+        emergencyContact: (map['emergencyContact'] as Map?) != null
+            ? EmergencyContact.fromMap(map['emergencyContact'] as Map)
             : null,
       );
 
@@ -80,6 +125,12 @@ class LocationService {
   static Future<void> setOnline(String deviceId, bool online) =>
       _db.child('devices/$deviceId').update({'online': online, 'ts': DateTime.now().millisecondsSinceEpoch});
 
+  static Future<void> heartbeat(String deviceId) =>
+      _db.child('devices/$deviceId').update({'ts': DateTime.now().millisecondsSinceEpoch});
+
+  static Future<void> writeBattery(String deviceId, int level) =>
+      _db.child('devices/$deviceId/battery').set(level);
+
   static StreamSubscription<DatabaseEvent> listenDevice(String deviceId, void Function(Map<dynamic, dynamic>?) onData) =>
       _db.child('devices/$deviceId').onValue.listen((e) => onData(e.snapshot.value as Map<dynamic, dynamic>?));
 
@@ -117,8 +168,14 @@ class LocationService {
         try { onData(LocationData.fromMap(v as Map)); } catch (_) {}
       });
 
-  static Future<void> writeAlarmLog(String pairId, String deviceId, double distance) =>
-      _db.child('alarm_log/$pairId').push().set({'byDeviceId': deviceId, 'distance': distance.round(), 'ts': DateTime.now().millisecondsSinceEpoch});
+  static Future<void> writeAlarmLog(String pairId, String deviceId, double distance, {String type = 'proximity', String? zoneLabel}) =>
+      _db.child('alarm_log/$pairId').push().set({
+        'byDeviceId': deviceId,
+        'distance': distance.round(),
+        'type': type,
+        if (zoneLabel != null) 'zoneLabel': zoneLabel,
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      });
 
   static Stream<Position> startLocationStream() => Geolocator.getPositionStream(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 3));

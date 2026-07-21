@@ -9,6 +9,7 @@
 <title>UZAKDUR — Yönetici Paneli</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --bg: #0D0D0F; --surface: #16161A; --surface-high: #1E1E24; --border: #2A2A32;
@@ -22,8 +23,14 @@
   .header { display:flex; align-items:center; gap:12px; margin-bottom: 8px; }
   .logo { width:38px; height:38px; border-radius:10px; background:rgba(255,59,48,.12); border:1px solid rgba(255,59,48,.3); display:flex; align-items:center; justify-content:center; font-size:18px; }
   h1 { font-size:18px; letter-spacing:3px; font-weight:800; margin:0; }
-  .subtitle { color:var(--text2); font-size:13px; margin: 4px 0 32px; }
-  #errBanner { display:none; background:rgba(255,59,48,.12); border:1px solid rgba(255,59,48,.4); color:var(--danger); border-radius:12px; padding:14px 16px; font-size:12px; margin-bottom:20px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .subtitle { color:var(--text2); font-size:13px; margin: 4px 0 20px; }
+  #errBanner, #tamperBanner { display:none; border-radius:12px; padding:14px 16px; font-size:12px; margin-bottom:16px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  #errBanner { background:rgba(255,59,48,.12); border:1px solid rgba(255,59,48,.4); color:var(--danger); }
+  #tamperBanner { background:rgba(255,176,32,.12); border:1px solid rgba(255,176,32,.4); color:var(--warning); }
+  .stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px,1fr)); gap:12px; margin-bottom:20px; }
+  .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+  .stat-card .num { font-size:24px; font-weight:800; }
+  .stat-card .lbl { font-size:10px; letter-spacing:1.5px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; margin-bottom:20px; }
   .card h2 { font-size:12px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin:0 0 16px; font-weight:700; }
   table { width:100%; border-collapse: collapse; font-size: 13px; }
@@ -31,12 +38,16 @@
   td { padding: 10px; border-bottom:1px solid var(--border); vertical-align: middle; }
   tr:last-child td { border-bottom:none; }
   .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
-  .dot.on { background:var(--safe); box-shadow:0 0 6px rgba(0,200,150,.6); }
+  .dot.on { background:var(--safe); box-shadow:0 0 6px rgba(0,200,150,.6); animation: pulse 1.6s ease-in-out infinite; }
   .dot.off { background:var(--disabled); }
+  @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
   .badge { padding:3px 9px; border-radius:7px; font-size:11px; font-weight:700; }
   .badge.protected { background:rgba(79,172,254,.12); color:var(--role-b); border:1px solid rgba(79,172,254,.3); }
   .badge.tracked { background:rgba(255,95,87,.12); color:var(--role-a); border:1px solid rgba(255,95,87,.3); }
-  select, input[type=number], input[type=password], input[type=text] {
+  .badge.panic { background:rgba(255,59,48,.18); color:var(--danger); border:1px solid rgba(255,59,48,.5); animation: pulse 1s ease-in-out infinite; }
+  .batt { font-size:11px; color:var(--text2); }
+  .batt.low { color:var(--danger); font-weight:700; }
+  select, input[type=number], input[type=password], input[type=text], input[type=email] {
     background:var(--surface-high); border:1px solid var(--border); color:var(--text);
     border-radius:9px; padding:9px 11px; font-size:13px; outline:none;
   }
@@ -61,10 +72,13 @@
   .pair-card-title:hover { text-decoration: underline; }
   #detailOverlay { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60; display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding: 24px 16px; }
   #detailBox { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; width:100%; max-width:640px; }
-  #detailMap { width:100%; height:260px; border-radius:12px; margin-top:10px; background:var(--surface-high); }
+  #detailMap { width:100%; height:260px; border-radius:12px; margin-top:10px; background:var(--surface-high); cursor: default; }
   .detail-close { background:var(--surface-high); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:12px; }
-  .hist-row { display:flex; justify-content:space-between; font-size:12px; padding:6px 0; border-bottom:1px solid var(--border); }
+  .hist-row { display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:6px 0; border-bottom:1px solid var(--border); gap:8px; }
   .hist-row:last-child { border-bottom:none; }
+  .feed-row { font-size:12px; padding:8px 0; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:10px; }
+  .feed-row:last-child { border-bottom:none; }
+  #liveDot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:6px; animation: pulse 1.4s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -83,15 +97,30 @@
   <div class="header">
     <div class="logo">📡</div>
     <h1>UZAKDUR ADMIN</h1>
+    <div style="flex:1;"></div>
+    <button class="secondary" id="notifBtn" onclick="enableNotifications()">🔔 Bildirimleri Aç</button>
   </div>
-  <div class="subtitle">Cihazları eşleştir, alarm mesafesini ayarla, mesafe taleplerini yönet.</div>
+  <div class="subtitle"><span id="liveDot"></span>Canlı — cihazları eşleştir, alarm mesafesini ayarla, mesafe taleplerini yönet.</div>
   <div id="errBanner"></div>
+  <div id="tamperBanner"></div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="num" id="statDevices">0</div><div class="lbl">Cihaz</div></div>
+    <div class="stat-card"><div class="num" id="statOnline">0</div><div class="lbl">Çevrimiçi</div></div>
+    <div class="stat-card"><div class="num" id="statPairs">0</div><div class="lbl">Eşleşme</div></div>
+    <div class="stat-card"><div class="num" id="statAlarmsToday" style="color:var(--danger);">0</div><div class="lbl">Bugün Alarm</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Canlı Akış</h2>
+    <div id="liveFeed" class="empty">Henüz olay yok.</div>
+  </div>
 
   <div class="card">
     <h2>Kayıtlı Cihazlar</h2>
     <table>
-      <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Eşleşme</th></tr></thead>
-      <tbody id="devicesBody"><tr><td class="empty" colspan="4">Yükleniyor…</td></tr></tbody>
+      <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Pil</th><th>Eşleşme</th></tr></thead>
+      <tbody id="devicesBody"><tr><td class="empty" colspan="5">Yükleniyor…</td></tr></tbody>
     </table>
   </div>
 
@@ -128,7 +157,37 @@
       <button onclick="saveDetailThreshold()">Kaydet</button>
     </div>
     <div id="detailReq"></div>
-    <h2 style="margin-top:20px;">Önceki Uyarılar</h2>
+
+    <div class="row" style="justify-content:space-between; margin-top:20px;">
+      <h2 style="margin:0;">Yasak Bölgeler</h2>
+      <button class="secondary" id="addZoneBtn" onclick="toggleAddZone()">+ Bölge Ekle</button>
+    </div>
+    <div id="zoneHint" class="empty" style="display:none;">Haritada eklemek istediğin noktaya tıkla…</div>
+    <div id="zonePendingForm" style="display:none;">
+      <div class="row" style="margin-top:8px;">
+        <input type="text" id="zoneLabel" placeholder="Ad (örn. Ev)" style="flex:1;"/>
+        <input type="number" id="zoneRadius" placeholder="Yarıçap (m)" value="100" style="width:110px;"/>
+        <button class="safe" onclick="confirmAddZone()">Kaydet</button>
+        <button class="secondary" onclick="cancelAddZone()">İptal</button>
+      </div>
+    </div>
+    <div id="zoneList"></div>
+
+    <h2 style="margin-top:20px;">Acil Durum Kişisi</h2>
+    <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında korunan kişinin telefonu bu kişiye SMS/e-posta taslağı açar.</small>
+    <div class="row" style="margin-top:8px;">
+      <input type="text" id="ecName" placeholder="İsim" style="flex:1;"/>
+      <input type="text" id="ecPhone" placeholder="Telefon (+90...)" style="width:150px;"/>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input type="email" id="ecEmail" placeholder="E-posta (opsiyonel)" style="flex:1;"/>
+      <button onclick="saveEmergencyContact()">Kaydet</button>
+    </div>
+
+    <div class="row" style="justify-content:space-between; margin-top:20px;">
+      <h2 style="margin:0;">Önceki Uyarılar</h2>
+      <button class="secondary" onclick="exportPdf()">📄 PDF İndir</button>
+    </div>
     <div id="detailHistory" class="empty">Yükleniyor…</div>
   </div>
 </div>
@@ -138,10 +197,12 @@ const DB_URL = 'https://uyari-f25c4-default-rtdb.europe-west1.firebasedatabase.a
 const ADMIN_PASSWORD = 'uzakdur2026'; // İstersen bu satırı değiştirip kendi şifreni koy.
 
 const ROLE_LABEL = { protected: 'Korunan', tracked: 'Uzaklaştırılan' };
+const EVENT_LABEL = { proximity: 'Yaklaşma', zone: 'Yasak bölge', panic: 'PANİK', tamper: 'Şüpheli çevrimdışı' };
 
 function tryLogin() {
   const val = document.getElementById('pw').value;
   if (val === ADMIN_PASSWORD) {
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     boot();
@@ -184,9 +245,18 @@ async function putJSON(path, data) {
 async function deletePath(path) {
   await fetch(`${DB_URL}/${path}.json`, { method: 'DELETE' });
 }
+async function pushJSON(path, data) {
+  await fetch(`${DB_URL}/${path}.json`, { method: 'POST', body: JSON.stringify(data) });
+}
+function logEvent(pairId, type, extra) {
+  return pushJSON(`alarm_log/${pairId}`, Object.assign({ byDeviceId: 'admin', distance: 0, type, ts: Date.now() }, extra || {}));
+}
 
-let devices = {}, pairs = {}, locations = {};
-let detailMapObj = null, detailMarkers = [], detailCircle = null, openPairId = null;
+let devices = {}, pairs = {}, locations = {}, alarmLogAll = {};
+let detailMapObj = null, detailMarkers = [], detailCircle = null, detailZoneLayers = [], openPairId = null;
+let addingZone = false, pendingZoneLatLng = null;
+let notifEnabled = false, lastSeenTs = Date.now(), firstRefresh = true;
+let prevOnline = {};
 
 function isOnline(d) {
   return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
@@ -200,20 +270,75 @@ function partnerName(deviceId) {
   return devices[otherId]?.name || '(silinmiş cihaz)';
 }
 
+function canonicalPairIds() {
+  return Object.keys(pairs).filter(pid =>
+    devices[pairs[pid].protectedDeviceId]?.pairId === pid &&
+    devices[pairs[pid].trackedDeviceId]?.pairId === pid
+  );
+}
+
+function flatEvents() {
+  const out = [];
+  for (const pid of Object.keys(alarmLogAll)) {
+    const entries = alarmLogAll[pid] || {};
+    for (const id of Object.keys(entries)) out.push(Object.assign({ pairId: pid, id }, entries[id]));
+  }
+  out.sort((a, b) => b.ts - a.ts);
+  return out;
+}
+
+function pairLabel(pairId) {
+  const p = pairs[pairId];
+  if (!p) return '(silinmiş eşleşme)';
+  const pName = devices[p.protectedDeviceId]?.name || '?';
+  const tName = devices[p.trackedDeviceId]?.name || '?';
+  return `${pName} ⇄ ${tName}`;
+}
+
+function eventLine(e) {
+  const type = e.type || 'proximity';
+  if (type === 'panic') return `PANİK sinyali`;
+  if (type === 'zone') return `Yasak bölgeye girdi: ${e.zoneLabel || ''}`;
+  if (type === 'tamper') return `beklenmedik şekilde çevrimdışı oldu`;
+  return `${e.distance}m mesafeye yaklaştı`;
+}
+
 function render() {
-  const body = document.getElementById('devicesBody');
   const ids = Object.keys(devices);
+  const onlineCount = ids.filter(id => isOnline(devices[id])).length;
+  const pairIds = canonicalPairIds();
+  document.getElementById('statDevices').textContent = ids.length;
+  document.getElementById('statOnline').textContent = onlineCount;
+  document.getElementById('statPairs').textContent = pairIds.length;
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const todayCount = flatEvents().filter(e => e.ts >= todayStart.getTime()).length;
+  document.getElementById('statAlarmsToday').textContent = todayCount;
+
+  const feedEl = document.getElementById('liveFeed');
+  const feed = flatEvents().slice(0, 12);
+  feedEl.innerHTML = feed.length ? feed.map(e => {
+    const type = e.type || 'proximity';
+    const badge = type === 'panic' ? '<span class="badge panic">PANİK</span>' : '';
+    return `<div class="feed-row">
+      <span>${badge} <b>${escapeHtml(pairLabel(e.pairId))}</b> — ${escapeHtml(eventLine(e))}</span>
+      <span style="color:var(--muted); white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('tr-TR')}</span>
+    </div>`;
+  }).join('') : '<div class="empty">Henüz olay yok.</div>';
+
+  const body = document.getElementById('devicesBody');
   if (ids.length === 0) {
-    body.innerHTML = '<tr><td class="empty" colspan="4">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</td></tr>';
+    body.innerHTML = '<tr><td class="empty" colspan="5">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</td></tr>';
   } else {
     body.innerHTML = ids.map(id => {
       const d = devices[id];
       const online = isOnline(d);
       const partner = partnerName(id);
+      const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 20 ? 'low' : ''}">🔋 ${d.battery}%</span>` : '<span class="batt">—</span>';
       return `<tr>
         <td>${escapeHtml(d.name || '—')}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
         <td><span class="dot ${online ? 'on' : 'off'}"></span>${online ? 'Çevrimiçi' : 'Çevrimdışı'}</td>
+        <td>${batt}</td>
         <td>${partner ? `🔗 ${escapeHtml(partner)}` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
       </tr>`;
     }).join('');
@@ -231,12 +356,6 @@ function render() {
     ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)}</option>`).join('')
     : '<option disabled selected>Uygun uzaklaştırılan cihaz yok</option>';
 
-  // Only show pairs both member devices currently point back to — hides stale/orphaned
-  // records left behind if a pairing was created twice for the same two devices.
-  const pairIds = Object.keys(pairs).filter(pid =>
-    devices[pairs[pid].protectedDeviceId]?.pairId === pid &&
-    devices[pairs[pid].trackedDeviceId]?.pairId === pid
-  );
   const list = document.getElementById('pairsList');
   if (pairIds.length === 0) {
     list.innerHTML = '<div class="empty">Henüz eşleştirme yok.</div>';
@@ -246,6 +365,7 @@ function render() {
       const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
       const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
       const req = p.distanceRequest;
+      const zoneCount = p.zones ? Object.keys(p.zones).length : 0;
       return `<div class="card" style="background:var(--surface-high); margin-bottom:12px;">
         <div class="row" style="justify-content:space-between;">
           <div class="pair-line pair-card-title" onclick="openDetail('${pid}')">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
@@ -259,7 +379,8 @@ function render() {
           <input type="number" id="th_${pid}" value="${p.threshold}" min="10" max="5000" style="width:90px;"/>
           <span style="color:var(--muted); font-size:12px;">metre</span>
           <button onclick="saveThreshold('${pid}')">Kaydet</button>
-          <span style="color:var(--muted); font-size:12px; margin-left:12px;">Alarm sesi: <b style="color:var(--text2)">${p.alarmSound || 'siren'}</b></span>
+          <span style="color:var(--muted); font-size:12px; margin-left:12px;">Ses: <b style="color:var(--text2)">${p.alarmSound || 'siren'}</b></span>
+          ${zoneCount ? `<span style="color:var(--muted); font-size:12px;">🚫 ${zoneCount} bölge</span>` : ''}
         </div>
         ${req ? `<div class="row" style="margin-top:12px;">
           <span class="req">⚠ Talep: ${req.value}m</span>
@@ -323,16 +444,84 @@ async function rejectRequest(pairId) {
   await refresh();
 }
 
+function enableNotifications() {
+  if (!('Notification' in window)) { alert('Bu tarayıcı bildirimleri desteklemiyor.'); return; }
+  Notification.requestPermission().then(p => {
+    notifEnabled = p === 'granted';
+    document.getElementById('notifBtn').textContent = notifEnabled ? '🔔 Bildirimler Açık' : '🔕 İzin verilmedi';
+    if (notifEnabled) new Notification('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
+  });
+}
+
+let audioCtx = null;
+function playBeep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    [0, 0.18].forEach(offset => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.3, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.15);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now + offset); osc.stop(now + offset + 0.16);
+    });
+  } catch (_) {}
+}
+
+function checkLiveEvents() {
+  const events = flatEvents();
+  const newest = events.filter(e => e.ts > lastSeenTs);
+  if (firstRefresh) { firstRefresh = false; if (events[0]) lastSeenTs = events[0].ts; return; }
+  if (newest.length === 0) return;
+  lastSeenTs = Math.max(...newest.map(e => e.ts));
+  playBeep();
+  if (notifEnabled) {
+    const e = newest[0];
+    new Notification(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
+      body: `${pairLabel(e.pairId)} — ${eventLine(e)}`,
+    });
+  }
+}
+
+function checkTamper() {
+  const banner = document.getElementById('tamperBanner');
+  const messages = [];
+  for (const pid of canonicalPairIds()) {
+    const p = pairs[pid];
+    const trackedId = p.trackedDeviceId;
+    const d = devices[trackedId];
+    if (!d) continue;
+    const online = isOnline(d);
+    const key = trackedId;
+    if (prevOnline[key] === true && online === false) {
+      messages.push(`⚠ ${d.name || 'Cihaz'} beklenmedik şekilde çevrimdışı oldu.`);
+      logEvent(pid, 'tamper', { byDeviceId: trackedId });
+    }
+    prevOnline[key] = online;
+  }
+  if (messages.length) {
+    banner.style.display = 'block';
+    banner.textContent = messages.join('\n');
+    playBeep();
+  }
+}
+
 async function refresh() {
   const banner = document.getElementById('errBanner');
   try {
-    const [d, p, l] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs'), fetchJSON('locations')]);
+    const [d, p, l, a] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs'), fetchJSON('locations'), fetchJSON('alarm_log')]);
     devices = d || {};
     pairs = p || {};
     locations = l || {};
+    alarmLogAll = a || {};
     banner.style.display = 'none';
+    checkTamper();
+    checkLiveEvents();
     render();
-    if (openPairId && pairs[openPairId]) updateDetailMap();
+    if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); }
     else if (openPairId && !pairs[openPairId]) closeDetail();
   } catch (e) {
     banner.style.display = 'block';
@@ -344,6 +533,7 @@ function openDetail(pairId) {
   const p = pairs[pairId];
   if (!p) return;
   openPairId = pairId;
+  cancelAddZone();
   const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
   const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
   document.getElementById('detailTitle').innerHTML = `🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}`;
@@ -354,6 +544,10 @@ function openDetail(pairId) {
       <button class="safe" onclick="approveRequest('${pairId}', ${p.distanceRequest.value}); closeDetail();">Onayla</button>
       <button class="secondary" onclick="rejectRequest('${pairId}'); closeDetail();">Reddet</button>
     </div>` : '';
+  const ec = p.emergencyContact || {};
+  document.getElementById('ecName').value = ec.name || '';
+  document.getElementById('ecPhone').value = ec.phone || '';
+  document.getElementById('ecEmail').value = ec.email || '';
   document.getElementById('detailOverlay').style.display = 'flex';
 
   try {
@@ -361,18 +555,69 @@ function openDetail(pairId) {
     if (!detailMapObj) {
       detailMapObj = L.map('detailMap', { zoomControl: true, attributionControl: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(detailMapObj);
+      detailMapObj.on('click', (e) => {
+        if (!addingZone || !openPairId) return;
+        pendingZoneLatLng = e.latlng;
+        document.getElementById('zonePendingForm').style.display = 'block';
+      });
     }
     setTimeout(() => detailMapObj.invalidateSize(), 50);
     updateDetailMap();
   } catch (e) {
     document.getElementById('detailMap').innerHTML = `<div class="empty" style="color:var(--danger); padding:16px;">Harita yüklenemedi: ${escapeHtml(e.message)}</div>`;
   }
+  renderZoneList(pairId);
   loadDetailHistory(pairId);
 }
 
 function closeDetail() {
   openPairId = null;
+  cancelAddZone();
   document.getElementById('detailOverlay').style.display = 'none';
+}
+
+function toggleAddZone() {
+  addingZone = !addingZone;
+  document.getElementById('zoneHint').style.display = addingZone ? 'block' : 'none';
+  if (!addingZone) cancelAddZone();
+}
+function cancelAddZone() {
+  addingZone = false;
+  pendingZoneLatLng = null;
+  const hint = document.getElementById('zoneHint');
+  const form = document.getElementById('zonePendingForm');
+  if (hint) hint.style.display = 'none';
+  if (form) form.style.display = 'none';
+}
+async function confirmAddZone() {
+  if (!pendingZoneLatLng || !openPairId) return;
+  const label = document.getElementById('zoneLabel').value.trim() || 'Bölge';
+  const radius = Number(document.getElementById('zoneRadius').value) || 100;
+  const zoneId = genId();
+  await patchJSON(`pairs/${openPairId}/zones/${zoneId}`, { label, lat: pendingZoneLatLng.lat, lon: pendingZoneLatLng.lng, radius });
+  cancelAddZone();
+  await refresh();
+}
+function deleteZone(pairId, zoneId) {
+  deletePath(`pairs/${pairId}/zones/${zoneId}`).then(refresh);
+}
+function renderZoneList(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('zoneList');
+  if (!p) return;
+  const zones = p.zones ? Object.entries(p.zones) : [];
+  el.innerHTML = zones.length
+    ? zones.map(([zid, z]) => `<div class="hist-row"><span>🚫 ${escapeHtml(z.label)} (${z.radius}m)</span><button class="secondary" onclick="deleteZone('${pairId}','${zid}')">Sil</button></div>`).join('')
+    : '<div class="empty">Henüz bölge eklenmedi.</div>';
+}
+
+async function saveEmergencyContact() {
+  if (!openPairId) return;
+  const name = document.getElementById('ecName').value.trim();
+  const phone = document.getElementById('ecPhone').value.trim();
+  const email = document.getElementById('ecEmail').value.trim();
+  await patchJSON(`pairs/${openPairId}`, { emergencyContact: { name, phone, email } });
+  await refresh();
 }
 
 function updateDetailMap() {
@@ -381,6 +626,8 @@ function updateDetailMap() {
   detailMarkers.forEach(m => detailMapObj.removeLayer(m));
   detailMarkers = [];
   if (detailCircle) { detailMapObj.removeLayer(detailCircle); detailCircle = null; }
+  detailZoneLayers.forEach(l => detailMapObj.removeLayer(l));
+  detailZoneLayers = [];
 
   const pLoc = locations[p.protectedDeviceId];
   const tLoc = locations[p.trackedDeviceId];
@@ -396,7 +643,14 @@ function updateDetailMap() {
     detailMarkers.push(m);
     pts.push([tLoc.lat, tLoc.lon]);
   }
-  if (pts.length === 2) detailMapObj.fitBounds(pts, { padding: [30, 30] });
+  if (p.zones) {
+    for (const [zid, z] of Object.entries(p.zones)) {
+      const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#FFB020', fillColor: '#FFB020', fillOpacity: 0.1, weight: 1 }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
+      detailZoneLayers.push(c);
+      pts.push([z.lat, z.lon]);
+    }
+  }
+  if (pts.length >= 2) detailMapObj.fitBounds(pts, { padding: [30, 30] });
   else if (pts.length === 1) detailMapObj.setView(pts[0], 16);
   else detailMapObj.setView([41.0082, 28.9784], 6);
 }
@@ -410,13 +664,49 @@ async function loadDetailHistory(pairId) {
     if (!log) { el.innerHTML = '<div class="empty">Henüz alarm kaydı yok.</div>'; return; }
     const entries = Object.values(log).sort((a, b) => b.ts - a.ts).slice(0, 30);
     el.innerHTML = entries.map(e => {
-      const name = devices[e.byDeviceId]?.name || '(silinmiş cihaz)';
+      const name = devices[e.byDeviceId]?.name || (e.byDeviceId === 'admin' ? 'Sistem' : '(silinmiş cihaz)');
       const date = new Date(e.ts).toLocaleString('tr-TR');
-      return `<div class="hist-row"><span>${escapeHtml(date)} — ${escapeHtml(name)}</span><span style="color:var(--danger); font-weight:700;">${e.distance}m</span></div>`;
+      const type = e.type || 'proximity';
+      const valueEl = type === 'panic' ? '<span class="badge panic">PANİK</span>'
+        : type === 'zone' ? `<span style="color:var(--warning); font-weight:700;">🚫 ${escapeHtml(e.zoneLabel || '')}</span>`
+        : type === 'tamper' ? `<span style="color:var(--warning); font-weight:700;">çevrimdışı</span>`
+        : `<span style="color:var(--danger); font-weight:700;">${e.distance}m</span>`;
+      return `<div class="hist-row"><span>${escapeHtml(date)} — ${escapeHtml(name)}</span>${valueEl}</div>`;
     }).join('') || '<div class="empty">Henüz alarm kaydı yok.</div>';
   } catch (e) {
     el.innerHTML = `<div class="empty" style="color:var(--danger)">Uyarı geçmişi alınamadı: ${escapeHtml(e.message)}</div>`;
   }
+}
+
+async function exportPdf() {
+  if (!openPairId || !window.jspdf) return;
+  const p = pairs[openPairId];
+  const pName = devices[p.protectedDeviceId]?.name || '?';
+  const tName = devices[p.trackedDeviceId]?.name || '?';
+  const log = await fetchJSON(`alarm_log/${openPairId}`);
+  const entries = log ? Object.values(log).sort((a, b) => b.ts - a.ts) : [];
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('UZAKDUR — Alarm Geçmişi Raporu', 14, 18);
+  doc.setFontSize(10); doc.text(`${pName} <-> ${tName}`, 14, 26);
+  doc.text(`Oluşturulma: ${new Date().toLocaleString('tr-TR')}`, 14, 32);
+  doc.text(`Alarm eşiği: ${p.threshold}m`, 14, 38);
+  let y = 50;
+  doc.setFontSize(9);
+  doc.text('Tarih', 14, y); doc.text('Tür', 90, y); doc.text('Değer', 140, y);
+  y += 4; doc.line(14, y, 196, y); y += 6;
+  if (entries.length === 0) { doc.text('Kayıt yok.', 14, y); }
+  for (const e of entries) {
+    if (y > 280) { doc.addPage(); y = 20; }
+    const type = e.type || 'proximity';
+    const label = type === 'panic' ? 'PANIK' : type === 'zone' ? 'Yasak bolge' : type === 'tamper' ? 'Cevrimdisi' : 'Yaklasma';
+    const value = type === 'zone' ? (e.zoneLabel || '') : type === 'panic' || type === 'tamper' ? '-' : `${e.distance}m`;
+    doc.text(new Date(e.ts).toLocaleString('tr-TR'), 14, y);
+    doc.text(label, 90, y);
+    doc.text(String(value), 140, y);
+    y += 6;
+  }
+  doc.save(`uzakdur-${pName}-${tName}.pdf`);
 }
 
 async function saveDetailThreshold() {

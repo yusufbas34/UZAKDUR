@@ -6,6 +6,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:intl/intl.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/roles.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
@@ -34,15 +36,18 @@ class _MonitorScreenState extends State<MonitorScreen>
   PairData? _pair;
   LocationData? _myLocation, _otherLocation;
   double? _distance;
-  bool _isAlarm = false, _isRunning = false, _otherOnline = false;
+  bool _isAlarm = false, _isRunning = false, _otherOnline = false, _wasCaution = false;
   String _statusText = 'GPS bekleniyor…';
+  String? _alarmZoneLabel;
   String? _errorText;
+  bool _panicSending = false;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
+  final _battery = Battery();
 
   StreamSubscription<Position>? _posSub;
   StreamSubscription? _deviceSub, _pairSub, _otherLocSub, _otherOnlineSub;
-  Timer? _pollTimer;
+  Timer? _pollTimer, _batteryTimer;
 
   late AnimationController _alarmCtrl;
   late Animation<double> _alarmAnim;
@@ -88,6 +93,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     }
     setState(() { _isRunning = true; _statusText = 'Konum alınıyor…'; });
     await LocationService.setOnline(widget.deviceId, true);
+    _reportBattery();
+    _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) => _reportBattery());
 
     _deviceSub = LocationService.listenDevice(widget.deviceId, _handleDeviceUpdate);
 
@@ -100,7 +107,17 @@ class _MonitorScreenState extends State<MonitorScreen>
       _checkDistance();
     }, onError: (e) => _setError('GPS hatası: $e'));
 
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _checkDistance());
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      LocationService.heartbeat(widget.deviceId);
+      _checkDistance();
+    });
+  }
+
+  Future<void> _reportBattery() async {
+    try {
+      final level = await _battery.batteryLevel;
+      await LocationService.writeBattery(widget.deviceId, level);
+    } catch (_) {}
   }
 
   void _handleDeviceUpdate(Map<dynamic, dynamic>? data) {
@@ -134,32 +151,94 @@ class _MonitorScreenState extends State<MonitorScreen>
         ForegroundTaskService.start(deviceId: widget.deviceId);
       }
       _checkDistance();
+      _updateMap();
     });
   }
 
+  ZoneData? _breachedZone() {
+    if (_isProtected || _myLocation == null || _pair == null) return null;
+    for (final z in _pair!.zones) {
+      final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, z.lat, z.lon);
+      if (d < z.radius) return z;
+    }
+    return null;
+  }
+
   void _checkDistance() {
-    if (_myLocation == null || _otherLocation == null || _pair == null) return;
-    final threshold = _pair!.threshold;
-    final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, _otherLocation!.lat, _otherLocation!.lon);
-    final isAlarm = d < threshold;
+    if (_pair == null) return;
+    final zone = _breachedZone();
+    double? d;
+    bool proximityAlarm = false;
+    bool caution = false;
+    if (_myLocation != null && _otherLocation != null) {
+      final threshold = _pair!.threshold;
+      d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, _otherLocation!.lat, _otherLocation!.lon);
+      proximityAlarm = d < threshold;
+      caution = !proximityAlarm && d < threshold * 1.5;
+    }
+    final isAlarm = proximityAlarm || zone != null;
     final now = _fmt.format(DateTime.now());
     if (!mounted) return;
     setState(() {
       _distance = d;
       _isAlarm = isAlarm;
-      _statusText = isAlarm ? 'Yaklaşma tespit edildi!' : d < threshold * 1.5 ? 'Dikkat — Sınıra yaklaşıyor' : 'Güvenli mesafede';
-      if (_log.isEmpty || _log.first.isAlarm != isAlarm) {
+      _alarmZoneLabel = zone?.label;
+      _statusText = zone != null
+          ? 'Yasak bölgede: ${zone.label}'
+          : proximityAlarm
+              ? 'Yaklaşma tespit edildi!'
+              : caution
+                  ? 'Dikkat — Sınıra yaklaşıyor'
+                  : 'Güvenli mesafede';
+      if (d != null && (_log.isEmpty || _log.first.isAlarm != isAlarm)) {
         _log.insert(0, LogEntry(now, d, isAlarm));
         if (_log.length > 100) _log.removeLast();
       }
     });
     if (isAlarm) {
       if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
-      NotificationService.startAlarm(d, soundId: _pair!.alarmSound);
-      LocationService.writeAlarmLog(_pairId!, widget.deviceId, d);
+      NotificationService.startAlarm(d ?? 0, soundId: _pair!.alarmSound);
+      if (zone != null) {
+        LocationService.writeAlarmLog(_pairId!, widget.deviceId, 0, type: 'zone', zoneLabel: zone.label);
+      } else if (d != null) {
+        LocationService.writeAlarmLog(_pairId!, widget.deviceId, d);
+      }
+      _wasCaution = false;
     } else {
       _alarmCtrl.stop(); _alarmCtrl.reset();
       NotificationService.stopAlarm();
+      if (caution && !_wasCaution) {
+        HapticFeedback.mediumImpact();
+      }
+      _wasCaution = caution;
+    }
+  }
+
+  Future<void> _triggerPanic() async {
+    if (_pairId == null || _panicSending) return;
+    setState(() => _panicSending = true);
+    HapticFeedback.heavyImpact();
+    try {
+      await LocationService.writeAlarmLog(_pairId!, widget.deviceId, 0, type: 'panic');
+      final contact = _pair?.emergencyContact;
+      if (contact != null && (contact.phone?.isNotEmpty ?? false)) {
+        final loc = _myLocation;
+        final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
+        final msg = Uri.encodeComponent('ACİL: ${widget.name} panik butonuna bastı. Konum: $locText');
+        final uri = Uri.parse('sms:${contact.phone}?body=$msg');
+        if (await canLaunchUrl(uri)) await launchUrl(uri);
+      } else if (contact != null && (contact.email?.isNotEmpty ?? false)) {
+        final loc = _myLocation;
+        final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
+        final uri = Uri(scheme: 'mailto', path: contact.email,
+            queryParameters: {'subject': 'ACİL — UZAKDUR Panik', 'body': '${widget.name} panik butonuna bastı.\nKonum: $locText'});
+        if (await canLaunchUrl(uri)) await launchUrl(uri);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Panik sinyali gönderildi'), backgroundColor: AppColors.danger));
+      }
+    } finally {
+      if (mounted) setState(() => _panicSending = false);
     }
   }
 
@@ -195,6 +274,22 @@ class _MonitorScreenState extends State<MonitorScreen>
       ));
     }
 
+    if (_pair != null) {
+      for (final z in _pair!.zones) {
+        final center = LatLng(z.lat, z.lon);
+        circles.add(Circle(
+          circleId: CircleId('zone_${z.id}'), center: center, radius: z.radius,
+          fillColor: AppColors.warning.withOpacity(0.1),
+          strokeColor: AppColors.warning.withOpacity(0.6), strokeWidth: 1,
+        ));
+        markers.add(Marker(
+          markerId: MarkerId('zone_${z.id}'), position: center,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+          infoWindow: InfoWindow(title: '🚫 ${z.label}'), zIndex: 0,
+        ));
+      }
+    }
+
     if (_myLocation != null && _otherLocation != null) {
       polylines.add(Polyline(
         polylineId: const PolylineId('line'),
@@ -218,7 +313,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Future<void> _stop() async {
-    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel();
+    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel(); _batteryTimer?.cancel();
     _alarmCtrl.stop(); _alarmCtrl.reset();
     NotificationService.stopAlarm();
     ForegroundTaskService.stop().ignore();
@@ -295,7 +390,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel();
+    _posSub?.cancel(); _deviceSub?.cancel(); _pairSub?.cancel(); _otherLocSub?.cancel(); _otherOnlineSub?.cancel(); _pollTimer?.cancel(); _batteryTimer?.cancel();
     _alarmCtrl.dispose(); _mapCtrl?.dispose();
     NotificationService.stopAlarm().ignore();
     ForegroundTaskService.stop().ignore();
@@ -356,7 +451,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       _OnlineDot(label: 'Ben', online: _isRunning, color: _roleColor),
       if (_pairId != null) ...[
         const SizedBox(width: 10),
-        _OnlineDot(label: 'Eşim', online: _otherOnline, color: _isProtected ? AppColors.roleA : AppColors.roleB),
+        _OnlineDot(label: 'Karşı Taraf', online: _otherOnline, color: _isProtected ? AppColors.roleA : AppColors.roleB),
       ],
     ]),
   );
@@ -401,6 +496,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         const SizedBox(height: 8),
         _MapBtn(icon: Icons.fit_screen_rounded, active: false, color: AppColors.textSecondary, onTap: () { setState(() => _mapFollowsMe = false); _updateMap(); }),
       ])),
+      if (_isProtected && _pairId != null) Positioned(bottom: 12, left: 12, child: _PanicButton(sending: _panicSending, onFire: _triggerPanic)),
       if (_isAlarm) Positioned(bottom: 0, left: 0, right: 0,
           child: AnimatedBuilder(animation: _alarmAnim, builder: (_, __) => Container(height: 3, color: AppColors.danger.withOpacity(0.5 + 0.5 * _alarmAnim.value)))),
     ]),
@@ -416,7 +512,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     child: Row(children: [
       Container(width: 36, height: 36,
           decoration: BoxDecoration(color: _statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
-          child: Icon(_isAlarm ? Icons.warning_rounded : Icons.check_circle_rounded, color: _statusColor, size: 18)),
+          child: Icon(_alarmZoneLabel != null ? Icons.block_rounded : _isAlarm ? Icons.warning_rounded : Icons.check_circle_rounded, color: _statusColor, size: 18)),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(_statusText, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: _isAlarm ? AppColors.danger : AppColors.textPrimary)),
@@ -424,7 +520,7 @@ class _MonitorScreenState extends State<MonitorScreen>
                 '${_isProtected && _pair?.distanceRequest != null ? '  •  Talep: ${_pair!.distanceRequest!.round()}m bekleniyor' : ''}',
             style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
       ])),
-      GestureDetector(
+      if (_isProtected) GestureDetector(
         onTap: _isRunning ? _stop : _start,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -520,6 +616,27 @@ class _IconBtn extends StatelessWidget {
     decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(9), border: Border.all(color: AppColors.border)),
     child: Icon(icon, color: AppColors.textSecondary, size: 16),
   ));
+}
+
+class _PanicButton extends StatelessWidget {
+  final bool sending; final VoidCallback onFire;
+  const _PanicButton({required this.sending, required this.onFire});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onLongPress: sending ? null : onFire,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.danger, borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: AppColors.danger.withOpacity(0.5), blurRadius: 14)],
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(sending ? Icons.hourglass_top_rounded : Icons.sos_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 8),
+        Text(sending ? 'Gönderiliyor…' : 'Basılı tut: PANİK', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+      ]),
+    ),
+  );
 }
 
 class _FloatingDistanceCard extends StatelessWidget {
