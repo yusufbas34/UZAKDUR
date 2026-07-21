@@ -144,6 +144,7 @@
   .feed-row { font-size:12.5px; padding:9px 0; border-bottom:1px solid var(--border-soft); display:flex; justify-content:space-between; gap:10px; color:var(--text); }
   .feed-row:last-child { border-bottom:none; }
   #liveDot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:7px; box-shadow:0 0 8px rgba(22,162,94,.5); animation: pulse 1.4s ease-in-out infinite; }
+  .zone-pin { font-size:19px; text-align:center; line-height:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); background:none !important; border:none !important; }
 </style>
 </head>
 <body>
@@ -229,15 +230,16 @@
     </div>
     <div id="zoneList"></div>
 
-    <h2 style="margin-top:20px;">Acil Durum Kişisi</h2>
-    <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında korunan kişinin telefonu bu kişiye SMS/e-posta taslağı açar.</small>
-    <div class="row" style="margin-top:8px;">
+    <h2 style="margin-top:20px;">Acil Durum Kişileri</h2>
+    <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında korunan kişinin telefonu, e-postası olan tüm kişilere tek bir e-posta taslağı açar (SMS devre dışı).</small>
+    <div id="contactList"></div>
+    <div class="row" style="margin-top:10px;">
       <input type="text" id="ecName" placeholder="İsim" style="flex:1;"/>
-      <input type="text" id="ecPhone" placeholder="Telefon (+90...)" style="width:150px;"/>
+      <input type="text" id="ecPhone" placeholder="Telefon (opsiyonel)" style="width:140px;"/>
     </div>
     <div class="row" style="margin-top:8px;">
-      <input type="email" id="ecEmail" placeholder="E-posta (opsiyonel)" style="flex:1;"/>
-      <button onclick="saveEmergencyContact()">Kaydet</button>
+      <input type="email" id="ecEmail" placeholder="E-posta" style="flex:1;"/>
+      <button onclick="addEmergencyContact()">+ Ekle</button>
     </div>
 
     <div class="row" style="justify-content:space-between; margin-top:20px;">
@@ -621,7 +623,7 @@ async function refresh() {
     checkTamper();
     checkLiveEvents();
     render();
-    if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); }
+    if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); renderContactList(openPairId); }
     else if (openPairId && !pairs[openPairId]) closeDetail();
   } catch (e) {
     banner.style.display = 'block';
@@ -643,10 +645,10 @@ function openDetail(pairId) {
       <button class="safe" onclick="approveRequest('${pairId}', ${p.distanceRequest.value}); closeDetail();">Onayla</button>
       <button class="secondary" onclick="rejectRequest('${pairId}'); closeDetail();">Reddet</button>
     </div>` : '';
-  const ec = p.emergencyContact || {};
-  document.getElementById('ecName').value = ec.name || '';
-  document.getElementById('ecPhone').value = ec.phone || '';
-  document.getElementById('ecEmail').value = ec.email || '';
+  document.getElementById('ecName').value = '';
+  document.getElementById('ecPhone').value = '';
+  document.getElementById('ecEmail').value = '';
+  renderContactList(pairId);
   document.getElementById('detailOverlay').style.display = 'flex';
 
   try {
@@ -727,13 +729,30 @@ function renderZoneList(pairId) {
     : '<div class="empty">Henüz bölge eklenmedi.</div>';
 }
 
-async function saveEmergencyContact() {
+async function addEmergencyContact() {
   if (!openPairId) return;
   const name = document.getElementById('ecName').value.trim();
   const phone = document.getElementById('ecPhone').value.trim();
   const email = document.getElementById('ecEmail').value.trim();
-  await patchJSON(`pairs/${openPairId}`, { emergencyContact: { name, phone, email } });
+  if (!name && !phone && !email) return;
+  const cid = genId();
+  await patchJSON(`pairs/${openPairId}/emergencyContacts/${cid}`, { name, phone, email });
+  document.getElementById('ecName').value = '';
+  document.getElementById('ecPhone').value = '';
+  document.getElementById('ecEmail').value = '';
   await refresh();
+}
+function deleteEmergencyContact(pairId, contactId) {
+  deletePath(`pairs/${pairId}/emergencyContacts/${contactId}`).then(refresh);
+}
+function renderContactList(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('contactList');
+  if (!p) return;
+  const contacts = p.emergencyContacts ? Object.entries(p.emergencyContacts) : [];
+  el.innerHTML = contacts.length
+    ? contacts.map(([cid, c]) => `<div class="hist-row"><span>👤 ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}</span><button class="secondary" onclick="deleteEmergencyContact('${pairId}','${cid}')">Sil</button></div>`).join('')
+    : '<div class="empty">Henüz acil durum kişisi eklenmedi.</div>';
 }
 
 function updateDetailMap() {
@@ -761,8 +780,10 @@ function updateDetailMap() {
   }
   if (p.zones) {
     for (const [zid, z] of Object.entries(p.zones)) {
-      const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#C9740A', fillColor: '#C9740A', fillOpacity: 0.1, weight: 1 }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
+      const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#C9740A', fillColor: '#C9740A', fillOpacity: 0.22, weight: 2, dashArray: '6,5' }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
       detailZoneLayers.push(c);
+      const zm = L.marker([z.lat, z.lon], { icon: L.divIcon({ className: 'zone-pin', html: '🚫', iconSize: [22, 22] }) }).addTo(detailMapObj).bindPopup('🚫 ' + z.label);
+      detailZoneLayers.push(zm);
       pts.push([z.lat, z.lon]);
     }
   }

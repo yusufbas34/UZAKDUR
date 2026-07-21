@@ -220,17 +220,15 @@ class _MonitorScreenState extends State<MonitorScreen>
     HapticFeedback.heavyImpact();
     try {
       await LocationService.writeAlarmLog(_pairId!, widget.deviceId, 0, type: 'panic');
-      final contact = _pair?.emergencyContact;
-      if (contact != null && (contact.phone?.isNotEmpty ?? false)) {
+      final emails = (_pair?.emergencyContacts ?? const [])
+          .map((c) => c.email)
+          .whereType<String>()
+          .where((e) => e.trim().isNotEmpty)
+          .toList();
+      if (emails.isNotEmpty) {
         final loc = _myLocation;
         final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
-        final msg = Uri.encodeComponent('ACİL: ${widget.name} panik butonuna bastı. Konum: $locText');
-        final uri = Uri.parse('sms:${contact.phone}?body=$msg');
-        if (await canLaunchUrl(uri)) await launchUrl(uri);
-      } else if (contact != null && (contact.email?.isNotEmpty ?? false)) {
-        final loc = _myLocation;
-        final locText = loc != null ? 'https://maps.google.com/?q=${loc.lat},${loc.lon}' : 'konum alınamadı';
-        final uri = Uri(scheme: 'mailto', path: contact.email,
+        final uri = Uri(scheme: 'mailto', path: emails.join(','),
             queryParameters: {'subject': 'ACİL — UZAKDUR Panik', 'body': '${widget.name} panik butonuna bastı.\nKonum: $locText'});
         if (await canLaunchUrl(uri)) await launchUrl(uri);
       }

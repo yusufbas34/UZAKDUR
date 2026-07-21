@@ -33,12 +33,14 @@ class ZoneData {
 }
 
 class EmergencyContact {
+  final String id;
   final String name;
   final String? phone;
   final String? email;
-  const EmergencyContact({required this.name, this.phone, this.email});
+  const EmergencyContact({required this.id, required this.name, this.phone, this.email});
 
-  factory EmergencyContact.fromMap(Map<dynamic, dynamic> map) => EmergencyContact(
+  factory EmergencyContact.fromMap(String id, Map<dynamic, dynamic> map) => EmergencyContact(
+        id: id,
         name: (map['name'] as String?) ?? '',
         phone: map['phone'] as String?,
         email: map['email'] as String?,
@@ -53,7 +55,7 @@ class PairData {
   final String alarmSound;
   final double? distanceRequest;
   final List<ZoneData> zones;
-  final EmergencyContact? emergencyContact;
+  final List<EmergencyContact> emergencyContacts;
   const PairData({
     required this.id,
     required this.protectedDeviceId,
@@ -62,7 +64,7 @@ class PairData {
     required this.alarmSound,
     this.distanceRequest,
     this.zones = const [],
-    this.emergencyContact,
+    this.emergencyContacts = const [],
   });
 
   factory PairData.fromMap(String id, Map<dynamic, dynamic> map) => PairData(
@@ -82,9 +84,14 @@ class PairData {
                 .whereType<ZoneData>()
                 .toList() ??
             const [],
-        emergencyContact: (map['emergencyContact'] as Map?) != null
-            ? EmergencyContact.fromMap(map['emergencyContact'] as Map)
-            : null,
+        emergencyContacts: (map['emergencyContacts'] as Map?)
+                ?.entries
+                .map((e) {
+                  try { return EmergencyContact.fromMap(e.key as String, e.value as Map); } catch (_) { return null; }
+                })
+                .whereType<EmergencyContact>()
+                .toList() ??
+            const [],
       );
 
   String otherDeviceId(String myDeviceId) =>
