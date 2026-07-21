@@ -157,6 +157,20 @@
   .status-label.safe { color:var(--safe); }
   .status-label.unknown { color:var(--muted); }
   .mono { font-family:'Courier New',monospace; font-size:12px; }
+  .feed-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .feed-tab {
+    background:var(--surface); color:var(--text2); border:1px solid var(--border); box-shadow:none;
+    padding:8px 14px; font-size:12.5px; display:flex; align-items:center; gap:7px;
+  }
+  .feed-tab:hover { background:var(--surface-hover); filter:none; }
+  .feed-tab .cnt { background:var(--border); color:var(--text2); border-radius:100px; padding:1px 8px; font-size:11px; font-weight:800; }
+  .feed-tab.urgent.active { background:var(--danger-soft); color:var(--danger); border-color:rgba(226,59,54,.4); }
+  .feed-tab.urgent.active .cnt { background:var(--danger); color:#fff; }
+  .feed-tab.important.active { background:var(--warning-soft); color:var(--warning); border-color:rgba(201,116,10,.4); }
+  .feed-tab.important.active .cnt { background:var(--warning); color:#fff; }
+  .feed-tab.normal.active { background:var(--safe-soft); color:var(--safe); border-color:rgba(22,162,94,.4); }
+  .feed-tab.normal.active .cnt { background:var(--safe); color:#fff; }
+  #liveFeedPanel { margin-top:14px; }
 </style>
 </head>
 <body>
@@ -210,7 +224,14 @@
 
   <div class="card">
     <h2>Canlı Akış</h2>
-    <div id="liveFeed" class="empty">Henüz olay yok.</div>
+    <div class="feed-tabs">
+      <button class="feed-tab urgent" id="feedTab_urgent" onclick="toggleLiveFeedTab('urgent')">🆘 Acil! <span class="cnt" id="feedCnt_urgent">0</span></button>
+      <button class="feed-tab important" id="feedTab_important" onclick="toggleLiveFeedTab('important')">⚠ Önemli! <span class="cnt" id="feedCnt_important">0</span></button>
+      <button class="feed-tab normal" id="feedTab_normal" onclick="toggleLiveFeedTab('normal')">ℹ Normal! <span class="cnt" id="feedCnt_normal">0</span></button>
+    </div>
+    <div id="liveFeedPanel" class="hidden">
+      <div id="liveFeed" class="empty">Henüz olay yok.</div>
+    </div>
   </div>
 
   <div class="card">
@@ -525,6 +546,48 @@ function eventLine(e) {
   return `${e.distance}m mesafeye yaklaştı`;
 }
 
+// Canlı Akış'ı Acil/Önemli/Normal olarak gruplamak için: panik ve yasak
+// bölge ihlali hayati risk taşıdığından acil; beklenmedik çevrimdışı kalma
+// ve eşleşme sonlandırma idari ama takip edilmesi gereken olaylar; sıradan
+// mesafe yaklaşmaları ise normal akış.
+function feedSeverity(e) {
+  const type = e.type || 'proximity';
+  if (type === 'panic' || type === 'zone') return 'urgent';
+  if (type === 'tamper' || type === 'pair_removed') return 'important';
+  return 'normal';
+}
+
+let liveFeedTab = null;
+
+function toggleLiveFeedTab(sev) {
+  liveFeedTab = liveFeedTab === sev ? null : sev;
+  renderLiveFeed();
+}
+
+function renderLiveFeed() {
+  const feed = flatEvents();
+  const groups = { urgent: [], important: [], normal: [] };
+  feed.forEach(e => groups[feedSeverity(e)].push(e));
+  ['urgent', 'important', 'normal'].forEach(sev => {
+    document.getElementById(`feedCnt_${sev}`).textContent = groups[sev].length;
+    document.getElementById(`feedTab_${sev}`).classList.toggle('active', liveFeedTab === sev);
+  });
+
+  const panel = document.getElementById('liveFeedPanel');
+  const feedEl = document.getElementById('liveFeed');
+  if (!liveFeedTab) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const rows = groups[liveFeedTab].slice(0, 30);
+  feedEl.innerHTML = rows.length ? rows.map(e => {
+    const type = e.type || 'proximity';
+    const badge = type === 'panic' ? '<span class="badge panic">PANİK</span>' : '';
+    return `<div class="feed-row">
+      <span>${badge} <b>${escapeHtml(eventPairLabel(e))}</b> — ${escapeHtml(eventLine(e))}</span>
+      <span style="color:var(--muted); white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('tr-TR')}</span>
+    </div>`;
+  }).join('') : '<div class="empty">Bu kategoride olay yok.</div>';
+}
+
 function renderOpsBoard(pairIds) {
   const tbody = document.getElementById('opsBody');
   const q = (document.getElementById('opsSearch')?.value || '').trim().toLowerCase();
@@ -620,17 +683,7 @@ function render() {
   renderAllCasesMap(pairIds);
   renderResetRequests();
   renderContactRequestsGlobal();
-
-  const feedEl = document.getElementById('liveFeed');
-  const feed = flatEvents().slice(0, 12);
-  feedEl.innerHTML = feed.length ? feed.map(e => {
-    const type = e.type || 'proximity';
-    const badge = type === 'panic' ? '<span class="badge panic">PANİK</span>' : '';
-    return `<div class="feed-row">
-      <span>${badge} <b>${escapeHtml(eventPairLabel(e))}</b> — ${escapeHtml(eventLine(e))}</span>
-      <span style="color:var(--muted); white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('tr-TR')}</span>
-    </div>`;
-  }).join('') : '<div class="empty">Henüz olay yok.</div>';
+  renderLiveFeed();
 
   const body = document.getElementById('devicesBody');
   if (ids.length === 0) {
