@@ -20,7 +20,8 @@ Future<void> _handleLocationRequest(RemoteMessage message) async {
   if (deviceId == null) return;
   try {
     final pos = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 15)),
+      desiredAccuracy: LocationAccuracy.medium,
+      timeLimit: const Duration(seconds: 15),
     );
     await LocationService.writeLocation(deviceId, pos.latitude, pos.longitude);
   } catch (_) {
