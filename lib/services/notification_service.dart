@@ -31,7 +31,27 @@ class NotificationService {
           'uzakdur_status', 'UZAKDUR Servis',
           description: 'Arka plan servisi', importance: Importance.low,
         ));
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+          'uzakdur_battery', 'UZAKDUR Pil Uyarısı',
+          description: 'Pil seviyesi düşük olduğunda uyarır', importance: Importance.high,
+        ));
     await _player.setReleaseMode(ReleaseMode.loop);
+  }
+
+  static Future<void> showBatteryWarning(int level, {required bool critical}) async {
+    await _plugin.show(
+      critical ? 103 : 102,
+      critical ? '🔴 Pil Kritik Seviyede (%$level)' : '🟠 Pil Azalıyor (%$level)',
+      critical
+          ? 'Takip kesilebilir — telefonu en kısa sürede şarja tak.'
+          : 'Konum paylaşımının kesilmemesi için telefonu şarja takmayı unutma.',
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_battery', 'UZAKDUR Pil Uyarısı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
   }
 
   static Future<void> startAlarm(double distance, {String soundId = 'siren'}) async {

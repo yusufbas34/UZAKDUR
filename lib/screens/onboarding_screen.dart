@@ -21,6 +21,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   String? _role;
   bool _saving = false;
   bool _disguise = false;
@@ -93,7 +94,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       final deviceId = LocationService.generateDeviceId();
       final passwordHash = LocationService.hashPassword(email, password);
-      await LocationService.registerDevice(deviceId, name, _role!, email: email, passwordHash: passwordHash, kvkkAccepted: true);
+      await LocationService.registerDevice(deviceId, name, _role!, email: email, passwordHash: passwordHash, kvkkAccepted: true, phone: _phoneCtrl.text.trim());
       final p = await SharedPreferences.getInstance();
       await p.setString('device_id', deviceId);
       await p.setString('device_name', name);
@@ -276,6 +277,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
+    _phoneCtrl.dispose();
     super.dispose();
   }
 
@@ -360,6 +362,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.roleA.withOpacity(0.6))),
             ),
           ),
+          const SizedBox(height: 24),
+          Text('TELEFON (opsiyonel)', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 15),
+            decoration: InputDecoration(
+              hintText: '05XX XXX XX XX',
+              hintStyle: GoogleFonts.inter(color: AppColors.textDisabled),
+              filled: true, fillColor: AppColors.surface,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: AppColors.roleA.withOpacity(0.6))),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text('Pil seviyesi kritik düşerse admin panelinden seninle telefonla iletişime geçilebilmesi için istiyoruz.',
+              style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled, height: 1.4)),
           const SizedBox(height: 24),
         ],
         Text('E-POSTA', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textMuted, letterSpacing: 2)),

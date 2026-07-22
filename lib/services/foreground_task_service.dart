@@ -4,6 +4,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'location_service.dart';
 import 'notification_service.dart';
 
@@ -50,6 +51,28 @@ class _ProximityHandler extends TaskHandler {
     _lastZoneRatio = minRatio;
   }
 
+  // Pil %30 altına düşünce bir kez, %15 altına düşünce bir kez daha uyarır
+  // (SharedPreferences'taki kademe izolat yeniden başlasa da hatırlanır).
+  // Pil %40'ın üstüne çıkınca kademe sıfırlanır, böylece bir sonraki
+  // deşarj döngüsünde uyarılar yeniden tetiklenebilir.
+  Future<void> _checkBatteryWarning(int level) async {
+    final prefs = await SharedPreferences.getInstance();
+    final tier = prefs.getInt('battery_warn_tier') ?? 0;
+    if (level <= 15) {
+      if (tier < 2) {
+        await NotificationService.showBatteryWarning(level, critical: true);
+        await prefs.setInt('battery_warn_tier', 2);
+      }
+    } else if (level <= 30) {
+      if (tier < 1) {
+        await NotificationService.showBatteryWarning(level, critical: false);
+        await prefs.setInt('battery_warn_tier', 1);
+      }
+    } else if (level >= 40 && tier != 0) {
+      await prefs.setInt('battery_warn_tier', 0);
+    }
+  }
+
   bool _shouldFullCheck() {
     if (_alarming) return true; // alarm aktifken her zaman tam kontrol (yasak bölge çıkışı da dahil)
     final candidates = [_lastMinRatio, _lastZoneRatio].whereType<double>();
@@ -80,7 +103,11 @@ class _ProximityHandler extends TaskHandler {
     await LocationService.heartbeat(_deviceId);
     _tick++;
     if (_tick % 12 == 0) { // ~every 60s at 5s interval
-      try { await LocationService.writeBattery(_deviceId, await _battery.batteryLevel); } catch (_) {}
+      try {
+        final level = await _battery.batteryLevel;
+        await LocationService.writeBattery(_deviceId, level);
+        await _checkBatteryWarning(level);
+      } catch (_) {}
     }
     if (_myLat == null || _myLon == null) return;
     _updateZoneRatioFromCache();

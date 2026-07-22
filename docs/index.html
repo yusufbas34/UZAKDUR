@@ -437,6 +437,7 @@ let detailMapObj = null, detailMarkers = [], detailCircle = null, detailZoneLaye
 let zonePickerMapObj = null, zonePickerMarker = null, zonePickerLatLng = null;
 let notifEnabled = false, lastSeenTs = Date.now(), firstRefresh = true;
 let prevOnline = {};
+let prevBatteryTier = {};
 
 function isOnline(d) {
   return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
@@ -580,6 +581,8 @@ function eventLine(e) {
   if (type === 'zone') return `Yasak bölgeye girdi: ${e.zoneLabel || ''}`;
   if (type === 'tamper') return `beklenmedik şekilde çevrimdışı oldu`;
   if (type === 'pair_removed') return `Eşleşme sonlandırıldı`;
+  if (type === 'battery_critical') return `pil kritik seviyede (%${e.battery})`;
+  if (type === 'battery_low') return `pil azalıyor (%${e.battery})`;
   return `${e.distance}m mesafeye yaklaştı`;
 }
 
@@ -589,8 +592,8 @@ function eventLine(e) {
 // mesafe yaklaşmaları ise normal akış.
 function feedSeverity(e) {
   const type = e.type || 'proximity';
-  if (type === 'panic' || type === 'zone') return 'urgent';
-  if (type === 'tamper' || type === 'pair_removed') return 'important';
+  if (type === 'panic' || type === 'zone' || type === 'battery_critical') return 'urgent';
+  if (type === 'tamper' || type === 'pair_removed' || type === 'battery_low') return 'important';
   return 'normal';
 }
 
@@ -675,9 +678,11 @@ function renderOpsBoard(pairIds) {
       : '—';
     const pBatt = typeof pDev.battery === 'number' ? pDev.battery : null;
     const tBatt = typeof tDev.battery === 'number' ? tDev.battery : null;
+    const callLink = (batt, phone) => (batt !== null && batt <= 30 && phone)
+      ? ` <a href="tel:${escapeHtml(phone)}" title="${escapeHtml(phone)} numarasını ara" onclick="event.stopPropagation()" style="text-decoration:none;">📞</a>` : '';
     const battCell = `
-      <span class="${pBatt !== null && pBatt <= 20 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>
-      <span class="${tBatt !== null && tBatt <= 20 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>
+      <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}
+      <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}
     `;
     return `<tr class="ops-row" onclick="openDetail('${r.pairId}')">
       <td><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></td>
@@ -768,7 +773,8 @@ function render() {
       const d = devices[id];
       const online = isOnline(d);
       const partners = partnerNames(id);
-      const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 20 ? 'low' : ''}">🔋 ${d.battery}%</span>` : '<span class="batt">—</span>';
+      const battCallLink = (d.battery <= 30 && d.phone) ? ` <a href="tel:${escapeHtml(d.phone)}" title="${escapeHtml(d.phone)} numarasını ara" style="text-decoration:none;">📞</a>` : '';
+      const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}` : '<span class="batt">—</span>';
       return `<tr>
         <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
@@ -1021,7 +1027,7 @@ function checkLiveEvents() {
   if (!alertable.length) return;
   playBeep();
   const e = alertable[0];
-  showNotif(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
+  showNotif(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : e.type === 'battery_critical' ? '🔴 Pil Kritik — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
     body: `${eventPairLabel(e)} — ${eventLine(e)}`,
   });
 }
@@ -1049,6 +1055,30 @@ function checkTamper() {
   }
 }
 
+// Pil %30 altına düşünce bir kez "önemli", %15 altına düşünce bir kez daha
+// "acil" olay kaydı düşer (hem korunan hem uzaklaştırılan cihaz için).
+// Cihaz birden fazla eşleşmede yer alabildiğinden olay, o cihazın yer
+// aldığı tüm eşleşmelere yazılır ki hangi eşleşme açıksa görünsün.
+function checkBatteryLevels() {
+  for (const id of Object.keys(devices)) {
+    const d = devices[id];
+    if (typeof d.battery !== 'number') continue;
+    const level = d.battery;
+    const prevTier = prevBatteryTier[id] || 0;
+    let tier = prevTier;
+    let type = null;
+    if (level <= 15) { tier = 2; if (prevTier < 2) type = 'battery_critical'; }
+    else if (level <= 30) { tier = 1; if (prevTier < 1) type = 'battery_low'; }
+    else if (level >= 40) { tier = 0; }
+    if (type) {
+      for (const pid of pairIdsForDevice(id)) {
+        logEvent(pid, type, { byDeviceId: id, battery: level });
+      }
+    }
+    prevBatteryTier[id] = tier;
+  }
+}
+
 async function refresh() {
   const banner = document.getElementById('errBanner');
   try {
@@ -1059,6 +1089,7 @@ async function refresh() {
     alarmLogAll = a || {};
     banner.style.display = 'none';
     checkTamper();
+    checkBatteryLevels();
     checkLiveEvents();
     render();
     if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); renderContactList(openPairId); renderContactRequests(openPairId); }
