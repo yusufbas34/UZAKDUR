@@ -407,6 +407,11 @@
 <script>
 const DB_URL = 'https://uyari-f25c4-default-rtdb.europe-west1.firebasedatabase.app';
 const ADMIN_PASSWORD = 'uzakdur2026'; // İstersen bu satırı değiştirip kendi şifreni koy.
+// "Konum iste" butonunun uygulama tamamen kapalıyken/servis durmuşken de
+// çalışabilmesi için Google Apps Script Web App URL'i (FCM push gönderir).
+// Boş bırakılırsa bu adım sessizce atlanır, buton yine de RTDB bayrağını
+// yazar (yalnızca servis zaten çalışıyorsa işe yarar).
+const APPS_SCRIPT_WAKE_URL = '';
 
 const ROLE_LABEL = { protected: 'Korunan', tracked: 'Uzaklaştırılan' };
 const EVENT_LABEL = { proximity: 'Yaklaşma', zone: 'Yasak bölge', panic: 'PANİK', tamper: 'Şüpheli çevrimdışı' };
@@ -498,17 +503,22 @@ async function sendAdminMsg() {
   }
 }
 
-// Uygulama arka planda birkaç saniyede bir bunu kontrol edip anında taze bir
-// GPS konumu alıp yazıyor — servis zaten çalışıyorsa (asıl zorlukları
-// tetikleyen durum GPS akışının henüz yeni bir nokta üretmemiş olması,
-// tamamen kapanmış bir uygulama değil) birkaç saniye içinde "Son Konum"
-// güncellenir. Uygulama tamamen kapatılmış/öldürülmüşse bu buton onu
-// uyandıramaz.
+// İki yol birden denenir: (1) devices/{id}/locationRequest bayrağı — servis
+// zaten arka planda çalışıyorsa birkaç saniye içinde yakalanıp taze konum
+// yazılır; (2) Apps Script üzerinden FCM "sessiz" push — uygulama tamamen
+// kapanmış/öldürülmüş olsa bile OS'u uyandırıp konum almayı dener (garantili
+// değil, OEM pil yönetimi engelleyebilir, ama tek gerçek uyandırma yolu budur).
 async function requestLocationNow(deviceId) {
   try {
     await patchJSON(`devices/${deviceId}/locationRequest`, { ts: { '.sv': 'timestamp' } });
   } catch (e) {
     alert('Konum isteği gönderilemedi: ' + e.message);
+    return;
+  }
+  if (APPS_SCRIPT_WAKE_URL) {
+    try {
+      await fetch(`${APPS_SCRIPT_WAKE_URL}?deviceId=${encodeURIComponent(deviceId)}`, { mode: 'no-cors' });
+    } catch (_) { /* sessiz push en iyi çaba (best-effort); RTDB bayrağı zaten yazıldı */ }
   }
 }
 
