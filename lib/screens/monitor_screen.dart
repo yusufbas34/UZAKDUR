@@ -805,6 +805,10 @@ class _MonitorScreenState extends State<MonitorScreen>
           Text(widget.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: _roleColor)),
         ]),
       ),
+      const SizedBox(width: 8),
+      // Kurulu build numarası — güncelleme/özellik sorunlarını teşhis
+      // ederken hangi sürümün telefonda çalıştığını görmek için.
+      Text('b${UpdateService.currentBuild}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textDisabled)),
       const Spacer(),
       if (_isProtected && _pairs.isNotEmpty) ...[
         _IconBtn(icon: Icons.rule_rounded, onTap: _requestDistance),
