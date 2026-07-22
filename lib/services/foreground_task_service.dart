@@ -73,6 +73,27 @@ class _ProximityHandler extends TaskHandler {
     }
   }
 
+  // Admin panelden gönderilen mesajı yakalar; ts, SharedPreferences'taki
+  // son görülenden yeniyse bildirim gösterip son görüleni günceller
+  // (aynı mesajın her tick'te tekrar bildirilmesini önler).
+  Future<void> _checkAdminMessage() async {
+    try {
+      final snap = await FirebaseDatabase.instance.ref('devices/$_deviceId/adminMsg').get();
+      final map = snap.value as Map?;
+      if (map == null) return;
+      final text = map['text'] as String?;
+      if (text == null || text.isEmpty) return;
+      final tsRaw = map['ts'];
+      final ts = tsRaw is int ? tsRaw : (tsRaw as num?)?.toInt() ?? 0;
+      final prefs = await SharedPreferences.getInstance();
+      final lastTs = prefs.getInt('admin_msg_last_ts') ?? 0;
+      if (ts > lastTs) {
+        await NotificationService.showAdminMessage(text);
+        await prefs.setInt('admin_msg_last_ts', ts);
+      }
+    } catch (_) {}
+  }
+
   bool _shouldFullCheck() {
     if (_alarming) return true; // alarm aktifken her zaman tam kontrol (yasak bölge çıkışı da dahil)
     final candidates = [_lastMinRatio, _lastZoneRatio].whereType<double>();
@@ -101,6 +122,7 @@ class _ProximityHandler extends TaskHandler {
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
     if (_deviceId.isEmpty) return;
     await LocationService.heartbeat(_deviceId);
+    await _checkAdminMessage();
     _tick++;
     if (_tick % 12 == 0) { // ~every 60s at 5s interval
       try {

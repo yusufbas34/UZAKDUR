@@ -37,7 +37,25 @@ class NotificationService {
           'uzakdur_battery', 'UZAKDUR Pil Uyarısı',
           description: 'Pil seviyesi düşük olduğunda uyarır', importance: Importance.high,
         ));
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+          'uzakdur_admin_msg', 'UZAKDUR Admin Mesajı',
+          description: 'Admin panelinden gönderilen mesajlar', importance: Importance.high,
+        ));
     await _player.setReleaseMode(ReleaseMode.loop);
+  }
+
+  static Future<void> showAdminMessage(String text) async {
+    await _plugin.show(
+      104,
+      '📨 Admin Mesajı',
+      text,
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_admin_msg', 'UZAKDUR Admin Mesajı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
   }
 
   static Future<void> showBatteryWarning(int level, {required bool critical}) async {

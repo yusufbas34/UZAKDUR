@@ -138,6 +138,10 @@
   #detailMap { width:100%; height:280px; border-radius:14px; margin-top:12px; background:var(--surface-hover); cursor: default; border:1px solid var(--border-soft); }
   #zonePickerMap { width:100%; height:340px; border-radius:14px; margin-top:12px; background:var(--surface-hover); cursor:crosshair; border:1px solid var(--border-soft); }
   .detail-close { background:var(--surface); color:var(--text2); border:1px solid var(--border); border-radius:9px; padding:7px 13px; font-size:12px; box-shadow:none; }
+  #msgOverlay { position:fixed; inset:0; background:rgba(18,20,28,.45); backdrop-filter: blur(3px); display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding: 24px 16px; z-index:9991; }
+  #msgBox { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; width:100%; box-shadow: 0 30px 60px rgba(18,20,28,.25); max-width: 460px; }
+  #msgText { font-family:inherit; font-size:13px; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--surface-hover); color:var(--text); resize:vertical; width:100%; box-sizing:border-box; }
+  .msg-btn { text-decoration:none; margin-left:6px; }
   .hist-row { display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:8px 0; border-bottom:1px solid var(--border-soft); gap:8px; color:var(--text); }
   .hist-row:last-child { border-bottom:none; }
   .feed-row { font-size:12.5px; padding:9px 0; border-bottom:1px solid var(--border-soft); display:flex; justify-content:space-between; gap:10px; color:var(--text); }
@@ -379,6 +383,30 @@
   </div>
 </div>
 
+<div id="msgOverlay">
+  <div id="msgBox">
+    <div class="row" style="justify-content:space-between;">
+      <div style="font-weight:700; font-size:15px;">💬 Mesaj Gönder</div>
+      <button class="detail-close" onclick="closeMsgModal()">Kapat ✕</button>
+    </div>
+    <div id="msgTargetLabel" style="color:var(--muted); font-size:12.5px; margin:6px 0 12px;"></div>
+    <select id="msgTemplate" onchange="applyMsgTemplate()" style="width:100%; margin-bottom:10px;">
+      <option value="">Standart mesaj seç…</option>
+      <option value="🔋 Şarjın bitiyor, lütfen telefonunu şarja tak.">🔋 Şarjın bitiyor</option>
+      <option value="📍 Nerede olduğunu bildirir misin?">📍 Konum bildir</option>
+      <option value="⚠️ Lütfen dikkatli ol.">⚠️ Dikkatli ol</option>
+      <option value="✅ İyi misin, her şey yolunda mı?">✅ İyi misin?</option>
+      <option value="__custom">✏️ Özel mesaj yaz…</option>
+    </select>
+    <textarea id="msgText" rows="3" placeholder="Mesaj metni…"></textarea>
+    <div class="row" style="margin-top:12px; justify-content:flex-end;">
+      <button class="secondary" onclick="closeMsgModal()">İptal</button>
+      <button onclick="sendAdminMsg()">Gönder</button>
+    </div>
+    <div id="msgStatus" style="font-size:12px; color:var(--muted); margin-top:8px;"></div>
+  </div>
+</div>
+
 <script>
 const DB_URL = 'https://uyari-f25c4-default-rtdb.europe-west1.firebasedatabase.app';
 const ADMIN_PASSWORD = 'uzakdur2026'; // İstersen bu satırı değiştirip kendi şifreni koy.
@@ -437,6 +465,40 @@ async function deletePath(path) { return writeRequest(path, 'DELETE'); }
 async function pushJSON(path, data) { return writeRequest(path, 'POST', data); }
 function logEvent(pairId, type, extra) {
   return pushJSON(`alarm_log/${pairId}`, Object.assign({ byDeviceId: 'admin', distance: 0, type, ts: Date.now() }, extra || {}));
+}
+
+let msgTargetDeviceId = null;
+function openMsgModal(deviceId, deviceName) {
+  msgTargetDeviceId = deviceId;
+  document.getElementById('msgTargetLabel').textContent = 'Alıcı: ' + (deviceName || '—');
+  document.getElementById('msgTemplate').value = '';
+  document.getElementById('msgText').value = '';
+  document.getElementById('msgStatus').textContent = '';
+  document.getElementById('msgOverlay').style.display = 'flex';
+}
+function closeMsgModal() {
+  document.getElementById('msgOverlay').style.display = 'none';
+  msgTargetDeviceId = null;
+}
+function applyMsgTemplate() {
+  const sel = document.getElementById('msgTemplate');
+  const box = document.getElementById('msgText');
+  if (sel.value === '__custom') { box.value = ''; box.focus(); }
+  else if (sel.value) { box.value = sel.value; }
+}
+async function sendAdminMsg() {
+  const text = document.getElementById('msgText').value.trim();
+  const statusEl = document.getElementById('msgStatus');
+  if (!msgTargetDeviceId) return;
+  if (!text) { statusEl.textContent = 'Önce bir mesaj yaz veya seç.'; return; }
+  statusEl.textContent = 'Gönderiliyor…';
+  try {
+    await patchJSON(`devices/${msgTargetDeviceId}/adminMsg`, { text, ts: { '.sv': 'timestamp' } });
+    statusEl.textContent = '✅ Gönderildi.';
+    setTimeout(closeMsgModal, 900);
+  } catch (e) {
+    statusEl.textContent = '❌ ' + e.message;
+  }
 }
 
 let devices = {}, pairs = {}, locations = {}, alarmLogAll = {};
@@ -687,9 +749,10 @@ function renderOpsBoard(pairIds) {
     const tBatt = typeof tDev.battery === 'number' ? tDev.battery : null;
     const callLink = (batt, phone) => (batt !== null && batt <= 30 && phone)
       ? ` <a href="tel:${escapeHtml(phone)}" title="${escapeHtml(phone)} numarasını ara" onclick="event.stopPropagation()" style="text-decoration:none;">📞</a>` : '';
+    const msgLink = (devId, name) => ` <a href="javascript:void(0)" class="msg-btn" title="Mesaj gönder" onclick="event.stopPropagation(); openMsgModal('${devId}', '${escapeHtml(name || '').replace(/'/g, "\\'")}')">💬</a>`;
     const battCell = `
-      <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}
-      <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}
+      <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}${msgLink(p.protectedDeviceId, pDev.name)}
+      <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}${msgLink(p.trackedDeviceId, tDev.name)}
     `;
     const locCell = `
       <span style="color:var(--text2);" title="Korunan">🛡️ ${r.pLoc?.ts ? escapeHtml(timeAgo(r.pLoc.ts)) : '—'}</span>
@@ -786,7 +849,8 @@ function render() {
       const online = isOnline(d);
       const partners = partnerNames(id);
       const battCallLink = (d.battery <= 30 && d.phone) ? ` <a href="tel:${escapeHtml(d.phone)}" title="${escapeHtml(d.phone)} numarasını ara" style="text-decoration:none;">📞</a>` : '';
-      const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}` : '<span class="batt">—</span>';
+      const devMsgLink = ` <a href="javascript:void(0)" class="msg-btn" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>`;
+      const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}${devMsgLink}` : `<span class="batt">—</span>${devMsgLink}`;
       const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : '—';
       return `<tr>
         <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
