@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/roles.dart';
 import '../services/location_service.dart';
 import '../services/disguise_service.dart';
+import '../services/push_service.dart';
 import '../theme/app_theme.dart';
 import '../kvkk_consent_text.dart';
 import 'monitor_screen.dart';
@@ -52,6 +53,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await p.setString('device_id', account.deviceId);
         await p.setString('device_name', account.name);
         await p.setString('device_role', account.role);
+        PushService.init(account.deviceId).ignore();
         if (!mounted) return;
         Navigator.pushReplacement(context, PageRouteBuilder(
           pageBuilder: (_, a, __) => MonitorScreen(deviceId: account.deviceId, name: account.name, role: account.role),
@@ -75,6 +77,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await p.setString('device_id', account.deviceId);
         await p.setString('device_name', account.name);
         await p.setString('device_role', account.role);
+        PushService.init(account.deviceId).ignore();
         if (!mounted) return;
         Navigator.pushReplacement(context, PageRouteBuilder(
           pageBuilder: (_, a, __) => MonitorScreen(deviceId: account.deviceId, name: account.name, role: account.role),
@@ -99,6 +102,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await DisguiseService.apply();
         await p.setBool('app_disguised', true);
       }
+      PushService.init(deviceId).ignore();
       if (!mounted) return;
       Navigator.pushReplacement(context, PageRouteBuilder(
         pageBuilder: (_, a, __) => MonitorScreen(deviceId: deviceId, name: name, role: _role!),

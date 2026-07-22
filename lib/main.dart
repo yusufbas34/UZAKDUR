@@ -8,6 +8,7 @@ import 'screens/onboarding_screen.dart';
 import 'screens/monitor_screen.dart';
 import 'services/notification_service.dart';
 import 'services/watchdog_service.dart';
+import 'services/push_service.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -21,6 +22,7 @@ void main() async {
   await NotificationService.init();
   await FlutterForegroundTask.requestIgnoreBatteryOptimization();
   await WatchdogService.init();
+  await PushService.registerBackgroundHandler();
   runApp(const UzakDurApp());
 }
 
@@ -57,6 +59,7 @@ class _StartupGateState extends State<_StartupGate> {
       _role = p.getString('device_role');
       _loading = false;
     });
+    if (_deviceId != null) PushService.init(_deviceId!).ignore();
   }
 
   @override

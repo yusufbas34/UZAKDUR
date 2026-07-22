@@ -274,6 +274,11 @@ class LocationService {
   // Korunan, acil durum kişisi ekleme/çıkarma işlemini doğrudan yapamaz;
   // yöneticinin web panelinden onaylaması gereken bir talep oluşturur.
   // protectedDeviceId, talebi gönderen korunan kişinin kendi deviceId'sidir.
+  // Sunucu tarafı (Apps Script), bir cihaz 30 dakikadır konum göndermemişse
+  // bu token'a FCM ile sessiz bir "konum iste" mesajı gönderir.
+  static Future<void> saveFcmToken(String deviceId, String token) =>
+      _db.child('devices/$deviceId').update({'fcmToken': token});
+
   static Future<void> requestAddContact(String protectedDeviceId, {required String name, String? phone, String? email, String type = 'family'}) =>
       _db.child('devices/$protectedDeviceId/contactRequests').push().set({
         'type': 'add',
