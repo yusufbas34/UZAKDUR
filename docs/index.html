@@ -144,6 +144,10 @@
   .feed-row:last-child { border-bottom:none; }
   #liveDot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:7px; box-shadow:0 0 8px rgba(22,162,94,.5); animation: pulse 1.4s ease-in-out infinite; }
   .zone-pin { font-size:19px; text-align:center; line-height:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); background:none !important; border:none !important; }
+  .map-label { background:var(--surface) !important; border:1px solid var(--border) !important; border-radius:8px !important; padding:2px 8px !important; font-size:11px !important; font-weight:700 !important; color:var(--text) !important; box-shadow:0 1px 4px rgba(20,22,30,.15); }
+  .map-label.protected { border-color:rgba(22,162,94,.4) !important; color:var(--safe) !important; }
+  .map-label.tracked { border-color:rgba(226,59,54,.4) !important; color:var(--danger) !important; }
+  .map-label::before { display:none !important; }
   #allCasesMap { width:100%; height:420px; border-radius:14px; border:1px solid var(--border-soft); background:var(--surface-hover); }
   .ops-row { cursor:pointer; }
   .led { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:8px; flex-shrink:0; }
@@ -235,7 +239,10 @@
     </div>
 
     <div class="card">
-      <h2>Canlı Akış</h2>
+      <div class="row" style="justify-content:space-between; margin-bottom:6px;">
+        <h2 style="margin:0;">Canlı Akış</h2>
+        <input type="date" id="feedDate" onchange="renderLiveFeed()" style="width:155px;"/>
+      </div>
       <div class="feed-tabs">
         <button class="feed-tab urgent" id="feedTab_urgent" onclick="toggleLiveFeedTab('urgent')">🆘 Acil! <span class="cnt" id="feedCnt_urgent">0</span></button>
         <button class="feed-tab important" id="feedTab_important" onclick="toggleLiveFeedTab('important')">⚠ Önemli! <span class="cnt" id="feedCnt_important">0</span></button>
@@ -493,6 +500,11 @@ function trackedInAnyZone(pair, trackedLoc) {
   return null;
 }
 
+function todayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function timeAgo(ts) {
   if (!ts) return '—';
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -612,7 +624,13 @@ function toggleLiveFeedTab(sev) {
 }
 
 function renderLiveFeed() {
-  const feed = flatEvents();
+  const dateInput = document.getElementById('feedDate');
+  if (dateInput && !dateInput.value) dateInput.value = todayDateStr();
+  const [y, m, d] = (dateInput?.value || todayDateStr()).split('-').map(Number);
+  const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+  const feed = flatEvents().filter(e => e.ts >= dayStart && e.ts < dayEnd);
   const groups = { urgent: [], important: [], normal: [] };
   feed.forEach(e => groups[feedSeverity(e)].push(e));
   ['urgent', 'important', 'normal'].forEach(sev => {
@@ -624,7 +642,7 @@ function renderLiveFeed() {
   const feedEl = document.getElementById('liveFeed');
   if (!liveFeedTab) { panel.classList.add('hidden'); return; }
   panel.classList.remove('hidden');
-  const rows = groups[liveFeedTab].slice(0, 30);
+  const rows = groups[liveFeedTab].slice(0, 200);
   feedEl.innerHTML = rows.length ? rows.map(e => {
     const type = e.type || 'proximity';
     const badge = type === 'panic' ? '<span class="badge panic">PANİK</span>' : '';
@@ -655,15 +673,18 @@ function renderOpsBoard(pairIds) {
     const distText = r.status === 'critical' && r.zone ? `🚫 ${escapeHtml(r.zone.label)}`
       : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> / ${p.threshold}m`
       : '—';
-    const battMin = [pDev.battery, tDev.battery].filter(b => typeof b === 'number');
-    const battText = battMin.length ? `🔋 ${Math.min(...battMin)}%` : '—';
-    const battLow = battMin.length && Math.min(...battMin) <= 20;
+    const pBatt = typeof pDev.battery === 'number' ? pDev.battery : null;
+    const tBatt = typeof tDev.battery === 'number' ? tDev.battery : null;
+    const battCell = `
+      <span class="${pBatt !== null && pBatt <= 20 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>
+      <span class="${tBatt !== null && tBatt <= 20 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>
+    `;
     return `<tr class="ops-row" onclick="openDetail('${r.pairId}')">
       <td><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></td>
       <td>${escapeHtml(r.label)}</td>
       <td>${distText}</td>
       <td>${r.lastEvent ? escapeHtml(timeAgo(r.lastEvent.ts)) : '—'}</td>
-      <td><span class="${battLow ? 'batt low' : 'batt'}">${battText}</span></td>
+      <td>${battCell}</td>
       <td><span class="dot ${isOnline(pDev) ? 'on' : 'off'}" title="Korunan"></span><span class="dot ${isOnline(tDev) ? 'on' : 'off'}" title="Uzaklaştırılan"></span></td>
     </tr>`;
   }).join('');
@@ -685,28 +706,34 @@ function renderAllCasesMap(pairIds) {
   allCasesLayers = [];
 
   const colorFor = { critical: '#E23B36', warning: '#C9740A', safe: '#16A25E', unknown: '#8A93A3' };
+  const GREEN = '#16A25E', RED = '#E23B36';
   const pts = [];
-  for (const pid of pairIds) {
+  pairIds.forEach((pid, idx) => {
     const st = pairStatus(pid);
-    const color = colorFor[st.status];
+    const lineColor = colorFor[st.status];
     const p = pairs[pid];
+    const n = idx + 1;
+    const pName = devices[p.protectedDeviceId]?.name || 'Korunan';
+    const tName = devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan';
     if (st.pLoc) {
-      const m = L.circleMarker([st.pLoc.lat, st.pLoc.lon], { radius: 7, color: '#2F6FED', fillColor: '#2F6FED', fillOpacity: .9, weight: 2 })
-        .addTo(allCasesMapObj).bindPopup('🛡️ ' + (devices[p.protectedDeviceId]?.name || 'Korunan'));
+      const m = L.circleMarker([st.pLoc.lat, st.pLoc.lon], { radius: 7, color: GREEN, fillColor: GREEN, fillOpacity: .9, weight: 2 })
+        .addTo(allCasesMapObj).bindPopup('🛡️ ' + pName)
+        .bindTooltip(`${n}-Korunan ${escapeHtml(pName)}`, { permanent: true, direction: 'top', offset: [0, -6], className: 'map-label protected' });
       allCasesLayers.push(m);
       pts.push([st.pLoc.lat, st.pLoc.lon]);
     }
     if (st.tLoc) {
-      const m = L.circleMarker([st.tLoc.lat, st.tLoc.lon], { radius: 7, color: color, fillColor: color, fillOpacity: .9, weight: 2 })
-        .addTo(allCasesMapObj).bindPopup('🎯 ' + (devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan') + ' — ' + STATUS_LABEL[st.status]);
+      const m = L.circleMarker([st.tLoc.lat, st.tLoc.lon], { radius: 7, color: RED, fillColor: RED, fillOpacity: .9, weight: 2 })
+        .addTo(allCasesMapObj).bindPopup('🎯 ' + tName + ' — ' + STATUS_LABEL[st.status])
+        .bindTooltip(`${n}-Uzaklaştırılan ${escapeHtml(tName)}`, { permanent: true, direction: 'top', offset: [0, -6], className: 'map-label tracked' });
       allCasesLayers.push(m);
       pts.push([st.tLoc.lat, st.tLoc.lon]);
     }
     if (st.pLoc && st.tLoc) {
-      const line = L.polyline([[st.pLoc.lat, st.pLoc.lon], [st.tLoc.lat, st.tLoc.lon]], { color: color, weight: 2, dashArray: '5,5', opacity: .7 }).addTo(allCasesMapObj);
+      const line = L.polyline([[st.pLoc.lat, st.pLoc.lon], [st.tLoc.lat, st.tLoc.lon]], { color: lineColor, weight: 2, dashArray: '5,5', opacity: .7 }).addTo(allCasesMapObj);
       allCasesLayers.push(line);
     }
-  }
+  });
   if (!allCasesMapFitted) {
     if (pts.length >= 2) allCasesMapObj.fitBounds(pts, { padding: [30, 30] });
     else if (pts.length === 1) allCasesMapObj.setView(pts[0], 14);
@@ -1229,15 +1256,22 @@ function updateDetailMap() {
 
   const pLoc = locations[p.protectedDeviceId];
   const tLoc = locations[p.trackedDeviceId];
+  const n = validPairIds().indexOf(openPairId) + 1;
+  const pName = devices[p.protectedDeviceId]?.name || 'Korunan';
+  const tName = devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan';
   const pts = [];
   if (pLoc) {
-    const m = L.marker([pLoc.lat, pLoc.lon]).addTo(detailMapObj).bindPopup('🛡️ ' + (devices[p.protectedDeviceId]?.name || 'Korunan'));
+    const m = L.circleMarker([pLoc.lat, pLoc.lon], { radius: 8, color: '#16A25E', fillColor: '#16A25E', fillOpacity: .9, weight: 2 })
+      .addTo(detailMapObj).bindPopup('🛡️ ' + pName)
+      .bindTooltip(`${n}-Korunan ${escapeHtml(pName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label protected' });
     detailMarkers.push(m);
     pts.push([pLoc.lat, pLoc.lon]);
     detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold, color: '#E23B36', fillColor: '#E23B36', fillOpacity: 0.08, weight: 1 }).addTo(detailMapObj);
   }
   if (tLoc) {
-    const m = L.marker([tLoc.lat, tLoc.lon]).addTo(detailMapObj).bindPopup('🎯 ' + (devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan'));
+    const m = L.circleMarker([tLoc.lat, tLoc.lon], { radius: 8, color: '#E23B36', fillColor: '#E23B36', fillOpacity: .9, weight: 2 })
+      .addTo(detailMapObj).bindPopup('🎯 ' + tName)
+      .bindTooltip(`${n}-Uzaklaştırılan ${escapeHtml(tName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label tracked' });
     detailMarkers.push(m);
     pts.push([tLoc.lat, tLoc.lon]);
   }
