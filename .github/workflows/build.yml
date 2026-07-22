@@ -3,6 +3,11 @@ name: Build UZAKDUR APK
 on:
   push:
     branches: [ main, 'claude/**' ]
+    # Sadece admin paneli (docs/, GitHub Pages) değişince APK'yı yeniden
+    # derleyip "yeni sürüm var" bildirimi tetiklemeyelim — telefondaki
+    # uygulama kodu bu değişikliklerden etkilenmiyor.
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:

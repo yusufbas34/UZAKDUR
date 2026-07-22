@@ -852,7 +852,10 @@ class _MonitorScreenState extends State<MonitorScreen>
         final pid = _pairs.keys.elementAt(i);
         final selected = pid == _focusedPairId;
         final statusColor = _statusColorFor(_pairStatus[pid]);
-        final name = _otherNameByPair[pid] ?? 'Eşleşme ${i + 1}';
+        // Uzaklaştırılan taraf, izin verilmedikçe korunanın kimliğini de
+        // görmemeli — haritadaki konum gizleme kuralıyla aynı gerekçe.
+        final canSeeOtherIdentity = _isProtected || (_pairs[pid]?.trackedCanSeeLocation ?? false);
+        final name = canSeeOtherIdentity ? (_otherNameByPair[pid] ?? 'Eşleşme ${i + 1}') : 'Eşleşme ${i + 1}';
         final online = _otherOnlineByPair[pid] ?? false;
         return GestureDetector(
           onTap: () => setState(() => _focusedPairId = pid),

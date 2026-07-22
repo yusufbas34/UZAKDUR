@@ -498,6 +498,20 @@ async function sendAdminMsg() {
   }
 }
 
+// Uygulama arka planda birkaç saniyede bir bunu kontrol edip anında taze bir
+// GPS konumu alıp yazıyor — servis zaten çalışıyorsa (asıl zorlukları
+// tetikleyen durum GPS akışının henüz yeni bir nokta üretmemiş olması,
+// tamamen kapanmış bir uygulama değil) birkaç saniye içinde "Son Konum"
+// güncellenir. Uygulama tamamen kapatılmış/öldürülmüşse bu buton onu
+// uyandıramaz.
+async function requestLocationNow(deviceId) {
+  try {
+    await patchJSON(`devices/${deviceId}/locationRequest`, { ts: { '.sv': 'timestamp' } });
+  } catch (e) {
+    alert('Konum isteği gönderilemedi: ' + e.message);
+  }
+}
+
 let devices = {}, pairs = {}, locations = {}, alarmLogAll = {};
 let detailMapObj = null, detailMarkers = [], detailCircle = null, detailZoneLayers = [], openPairId = null, detailMapFitted = false;
 let zonePickerMapObj = null, zonePickerMarker = null, zonePickerLatLng = null;
@@ -751,9 +765,10 @@ function renderOpsBoard(pairIds) {
       <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}${msgLink(p.protectedDeviceId, pDev.name)}
       <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}${msgLink(p.trackedDeviceId, tDev.name)}
     `;
+    const reqLink = (devId) => ` <a href="javascript:void(0)" class="msg-btn" title="Konum iste" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍</a>`;
     const locCell = `
-      <span style="color:var(--text2);" title="Korunan">🛡️ ${r.pLoc?.ts ? escapeHtml(timeAgo(r.pLoc.ts)) : '—'}</span>
-      <span style="color:var(--text2); margin-left:8px;" title="Uzaklaştırılan">🎯 ${r.tLoc?.ts ? escapeHtml(timeAgo(r.tLoc.ts)) : '—'}</span>
+      <span style="color:var(--text2);" title="Korunan">🛡️ ${r.pLoc?.ts ? escapeHtml(timeAgo(r.pLoc.ts)) : '—'}</span>${reqLink(p.protectedDeviceId)}
+      <span style="color:var(--text2); margin-left:8px;" title="Uzaklaştırılan">🎯 ${r.tLoc?.ts ? escapeHtml(timeAgo(r.tLoc.ts)) : '—'}</span>${reqLink(p.trackedDeviceId)}
     `;
     return `<tr class="ops-row" onclick="openDetail('${r.pairId}')">
       <td><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></td>
@@ -849,11 +864,12 @@ function render() {
       const devMsgLink = ` <a href="javascript:void(0)" class="msg-btn" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>`;
       const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}${devMsgLink}` : `<span class="batt">—</span>${devMsgLink}`;
       const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : '—';
+      const reqBtn = ` <a href="javascript:void(0)" class="msg-btn" title="Konum iste" onclick="requestLocationNow('${id}')">📍</a>`;
       return `<tr>
         <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
         <td><span class="dot ${online ? 'on' : 'off'}"></span>${online ? 'Çevrimiçi' : 'Çevrimdışı'}</td>
-        <td>${escapeHtml(lastLoc)}</td>
+        <td>${escapeHtml(lastLoc)}${reqBtn}</td>
         <td>${batt}</td>
         <td>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
         <td><button class="secondary" onclick="deleteDevice('${id}')">Sil</button></td>

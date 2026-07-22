@@ -94,6 +94,30 @@ class _ProximityHandler extends TaskHandler {
     } catch (_) {}
   }
 
+  // Admin panelden "Konum İste" ile tetiklenir. Konum akışı bir süredir yeni
+  // nokta üretmemişse (ör. GPS geçici sinyal kaybetti, cihaz hareketsiz vb.)
+  // beklemeden anında taze bir GPS okuması alıp yazar.
+  Future<void> _checkLocationRequest() async {
+    try {
+      final snap = await FirebaseDatabase.instance.ref('devices/$_deviceId/locationRequest').get();
+      final map = snap.value as Map?;
+      if (map == null) return;
+      final tsRaw = map['ts'];
+      final ts = tsRaw is int ? tsRaw : (tsRaw as num?)?.toInt() ?? 0;
+      final prefs = await SharedPreferences.getInstance();
+      final lastTs = prefs.getInt('loc_req_last_ts') ?? 0;
+      if (ts <= lastTs) return;
+      await prefs.setInt('loc_req_last_ts', ts);
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
+      );
+      _myLat = pos.latitude;
+      _myLon = pos.longitude;
+      await LocationService.writeLocation(_deviceId, pos.latitude, pos.longitude);
+    } catch (_) {}
+  }
+
   bool _shouldFullCheck() {
     if (_alarming) return true; // alarm aktifken her zaman tam kontrol (yasak bölge çıkışı da dahil)
     final candidates = [_lastMinRatio, _lastZoneRatio].whereType<double>();
@@ -123,6 +147,7 @@ class _ProximityHandler extends TaskHandler {
     if (_deviceId.isEmpty) return;
     await LocationService.heartbeat(_deviceId);
     await _checkAdminMessage();
+    await _checkLocationRequest();
     _tick++;
     if (_tick % 12 == 0) { // ~every 60s at 5s interval
       try {
