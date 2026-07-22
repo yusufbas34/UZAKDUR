@@ -141,7 +141,6 @@
   #msgOverlay { position:fixed; inset:0; background:rgba(18,20,28,.45); backdrop-filter: blur(3px); display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding: 24px 16px; z-index:9991; }
   #msgBox { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; width:100%; box-shadow: 0 30px 60px rgba(18,20,28,.25); max-width: 460px; }
   #msgText { font-family:inherit; font-size:13px; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--surface-hover); color:var(--text); resize:vertical; width:100%; box-sizing:border-box; }
-  .msg-btn { text-decoration:none; margin-left:6px; }
   .hist-row { display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:8px 0; border-bottom:1px solid var(--border-soft); gap:8px; color:var(--text); }
   .hist-row:last-child { border-bottom:none; }
   .feed-row { font-size:12.5px; padding:9px 0; border-bottom:1px solid var(--border-soft); display:flex; justify-content:space-between; gap:10px; color:var(--text); }
@@ -188,6 +187,50 @@
   .main-tab:hover { background:var(--surface-hover); filter:none; transform:none; }
   .main-tab.active { color:var(--text); border-bottom-color:var(--danger); font-weight:800; }
   .main-tab .req-dot { background:var(--danger); color:#fff; border-radius:100px; padding:1px 8px; font-size:11px; font-weight:800; }
+
+  /* Tablolar dar ekranlarda sıkışıp okunmaz olmak yerine yatay kaysın. */
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px; padding:0 4px; }
+  .table-wrap table { min-width:540px; }
+
+  /* 💬/📞/📍 gibi satır içi ikon linkleri metin boyutunda tıklanabilir alana
+     sahipti — parmakla dokunmayı zorlaştırıyordu. Hepsine tutarlı, dokunmaya
+     uygun bir hedef alan veriyoruz. */
+  .icon-link {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:28px; height:28px; border-radius:8px; text-decoration:none;
+    font-size:14px; vertical-align:middle; transition: background .12s ease;
+  }
+  .icon-link:hover, .icon-link:active { background:var(--surface-hover); }
+
+  /* Sekmeler arasında geçiş her zaman bir dokunuş uzaklıkta olsun diye,
+     uzun bir paneli kaydırırken bile üstte sabit kalır. */
+  .main-tabs {
+    position:sticky; top:0; z-index:40; background:var(--bg);
+    padding-top:10px; margin-top:-10px;
+  }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 18px 12px 70px; }
+    .header { gap:10px; }
+    h1 { font-size:15.5px; letter-spacing:1.5px; }
+    button#notifBtn { padding:8px 12px; font-size:12px; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); gap:10px; margin-bottom:16px; }
+    .stat-card { padding:13px 14px; }
+    .card { padding:15px; border-radius:15px; margin-bottom:14px; }
+    .main-tabs { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; gap:2px; }
+    .main-tabs::-webkit-scrollbar { display:none; }
+    .main-tab { padding:10px 12px; font-size:12.5px; white-space:nowrap; flex-shrink:0; }
+    table { font-size:12px; }
+    th, td { padding:9px 7px; }
+    .row[style*="space-between"] { align-items:flex-start; }
+    #opsSearch { width:100% !important; }
+    #allCasesMap { height:260px; }
+    #detailMap { height:210px; }
+    #zonePickerMap { height:260px; }
+    #msgBox, #zonePickerBox { max-width:100%; padding:18px; }
+    #msgOverlay, #zonePickerOverlay { padding:14px 10px; }
+    .pair-line { font-size:14px; flex-wrap:wrap; }
+  }
 </style>
 </head>
 <body>
@@ -233,7 +276,7 @@
         <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
         <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
       </div>
-      <div style="overflow-x:auto;">
+      <div class="table-wrap">
       <table>
         <thead><tr><th>Durum</th><th>Vaka</th><th>Mesafe / Eşik</th><th>Son Olay</th><th>Son Konum</th><th>Pil</th><th>Cihazlar</th></tr></thead>
         <tbody id="opsBody"><tr><td class="empty" colspan="7">Yükleniyor…</td></tr></tbody>
@@ -296,10 +339,12 @@
     <div class="card">
       <h2>Kayıtlı Cihazlar</h2>
       <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
+      <div class="table-wrap">
       <table>
         <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Son Konum</th><th>Pil</th><th>Eşleşme</th><th></th></tr></thead>
         <tbody id="devicesBody"><tr><td class="empty" colspan="7">Yükleniyor…</td></tr></tbody>
       </table>
+      </div>
     </div>
   </div>
 
@@ -769,13 +814,13 @@ function renderOpsBoard(pairIds) {
     const pBatt = typeof pDev.battery === 'number' ? pDev.battery : null;
     const tBatt = typeof tDev.battery === 'number' ? tDev.battery : null;
     const callLink = (batt, phone) => (batt !== null && batt <= 30 && phone)
-      ? ` <a href="tel:${escapeHtml(phone)}" title="${escapeHtml(phone)} numarasını ara" onclick="event.stopPropagation()" style="text-decoration:none;">📞</a>` : '';
-    const msgLink = (devId, name) => ` <a href="javascript:void(0)" class="msg-btn" title="Mesaj gönder" onclick="event.stopPropagation(); openMsgModal('${devId}', '${escapeHtml(name || '').replace(/'/g, "\\'")}')">💬</a>`;
+      ? ` <a href="tel:${escapeHtml(phone)}" title="${escapeHtml(phone)} numarasını ara" onclick="event.stopPropagation()" class="icon-link">📞</a>` : '';
+    const msgLink = (devId, name) => ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="event.stopPropagation(); openMsgModal('${devId}', '${escapeHtml(name || '').replace(/'/g, "\\'")}')">💬</a>`;
     const battCell = `
       <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}${msgLink(p.protectedDeviceId, pDev.name)}
       <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}${msgLink(p.trackedDeviceId, tDev.name)}
     `;
-    const reqLink = (devId) => ` <a href="javascript:void(0)" class="msg-btn" title="Konum iste" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍</a>`;
+    const reqLink = (devId) => ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍</a>`;
     const locCell = `
       <span style="color:var(--text2);" title="Korunan">🛡️ ${r.pLoc?.ts ? escapeHtml(timeAgo(r.pLoc.ts)) : '—'}</span>${reqLink(p.protectedDeviceId)}
       <span style="color:var(--text2); margin-left:8px;" title="Uzaklaştırılan">🎯 ${r.tLoc?.ts ? escapeHtml(timeAgo(r.tLoc.ts)) : '—'}</span>${reqLink(p.trackedDeviceId)}
@@ -870,11 +915,11 @@ function render() {
       const d = devices[id];
       const online = isOnline(d);
       const partners = partnerNames(id);
-      const battCallLink = (d.battery <= 30 && d.phone) ? ` <a href="tel:${escapeHtml(d.phone)}" title="${escapeHtml(d.phone)} numarasını ara" style="text-decoration:none;">📞</a>` : '';
-      const devMsgLink = ` <a href="javascript:void(0)" class="msg-btn" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>`;
+      const battCallLink = (d.battery <= 30 && d.phone) ? ` <a href="tel:${escapeHtml(d.phone)}" title="${escapeHtml(d.phone)} numarasını ara" class="icon-link">📞</a>` : '';
+      const devMsgLink = ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>`;
       const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}${devMsgLink}` : `<span class="batt">—</span>${devMsgLink}`;
       const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : '—';
-      const reqBtn = ` <a href="javascript:void(0)" class="msg-btn" title="Konum iste" onclick="requestLocationNow('${id}')">📍</a>`;
+      const reqBtn = ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="requestLocationNow('${id}')">📍</a>`;
       return `<tr>
         <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
