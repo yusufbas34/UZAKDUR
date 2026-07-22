@@ -319,6 +319,13 @@
       <span style="color:var(--muted); font-size:12px;">metre</span>
       <button onclick="saveDetailThreshold()">Kaydet</button>
     </div>
+    <div class="row" style="margin-top:10px;">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; color:var(--text2);">
+        <input type="checkbox" id="detailTrackedCanSeeLoc" onchange="toggleTrackedCanSeeLocation(this.checked)"/>
+        Uzaklaştırılan, korunanın konumunu haritada görebilsin
+      </label>
+    </div>
+    <small class="hint">Varsayılan olarak kapalıdır — uzaklaştırılan taraf yalnızca mesafe eşiği aşıldığında alarm alır, korunanın konumunu haritada göremez. Bunu yalnızca gerçek bir istisnai gereksinim varsa aç.</small>
     <div id="detailReq"></div>
 
     <div class="row" style="justify-content:space-between; margin-top:20px;">
@@ -1115,6 +1122,7 @@ function openDetail(pairId) {
   const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
   document.getElementById('detailTitle').innerHTML = `🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}`;
   document.getElementById('detailThreshold').value = p.threshold;
+  document.getElementById('detailTrackedCanSeeLoc').checked = !!p.trackedCanSeeLocation;
   const reqEl = document.getElementById('detailReq');
   reqEl.innerHTML = p.distanceRequest ? `<div class="row" style="margin-top:10px;">
       <span class="req">⚠ Talep: ${p.distanceRequest.value}m</span>
@@ -1390,6 +1398,12 @@ async function saveDetailThreshold() {
   const val = Number(document.getElementById('detailThreshold').value);
   if (!val || val < 5) return;
   await patchJSON(`pairs/${openPairId}`, { threshold: val });
+  await refresh();
+}
+
+async function toggleTrackedCanSeeLocation(checked) {
+  if (!openPairId) return;
+  await patchJSON(`pairs/${openPairId}`, { trackedCanSeeLocation: checked });
   await refresh();
 }
 

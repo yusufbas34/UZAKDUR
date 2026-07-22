@@ -469,7 +469,12 @@ class _MonitorScreenState extends State<MonitorScreen>
       if (_mapFollowsMe) _mapCtrl!.animateCamera(CameraUpdate.newLatLng(pos));
     }
 
-    if (_otherLocation != null) {
+    // Uzaklaştırılan taraf, korunan tarafın konumunu haritada göremez —
+    // yalnızca mesafe eşiği aşıldığında alarm alır. Bu, admin panelinden
+    // eşleşme bazında (trackedCanSeeLocation) istisnai olarak açılabilir.
+    final canSeeOtherLoc = _isProtected || (_pair?.trackedCanSeeLocation ?? false);
+
+    if (_otherLocation != null && canSeeOtherLoc) {
       markers.add(Marker(
         markerId: const MarkerId('other'),
         position: LatLng(_otherLocation!.lat, _otherLocation!.lon),
@@ -495,7 +500,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       }
     }
 
-    if (_myLocation != null && _otherLocation != null) {
+    if (_myLocation != null && _otherLocation != null && canSeeOtherLoc) {
       polylines.add(Polyline(
         polylineId: const PolylineId('line'),
         points: [LatLng(_myLocation!.lat, _myLocation!.lon), LatLng(_otherLocation!.lat, _otherLocation!.lon)],

@@ -73,6 +73,11 @@ class PairData {
   final double threshold;
   final String alarmSound;
   final double? distanceRequest;
+  // Varsayılan olarak kapalı: uzaklaştırılan taraf, korunan tarafın
+  // konumunu haritada GÖRMEZ — yalnızca mesafe eşiği aşıldığında alarm
+  // alır. Bu, admin panelinden istisnai olarak (ör. mahkeme kararı
+  // gerektiriyorsa) açılabilecek bir izin bayrağıdır.
+  final bool trackedCanSeeLocation;
   const PairData({
     required this.id,
     required this.protectedDeviceId,
@@ -80,6 +85,7 @@ class PairData {
     required this.threshold,
     required this.alarmSound,
     this.distanceRequest,
+    this.trackedCanSeeLocation = false,
   });
 
   // Not: yasak bölgeler ve acil durum kişileri artık pair'e değil, korunan
@@ -97,6 +103,7 @@ class PairData {
         distanceRequest: (map['distanceRequest'] as Map?)?['value'] != null
             ? ((map['distanceRequest']['value'] as num).toDouble())
             : null,
+        trackedCanSeeLocation: (map['trackedCanSeeLocation'] as bool?) ?? false,
       );
 
   String otherDeviceId(String myDeviceId) =>
