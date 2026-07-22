@@ -223,9 +223,8 @@
 
   <div class="main-tabs">
     <button class="main-tab" id="mainTab_ops" onclick="showMainTab('ops')">🎯 Operasyon</button>
-    <button class="main-tab" id="mainTab_pairs" onclick="showMainTab('pairs')">🔗 Eşleşmeler</button>
+    <button class="main-tab" id="mainTab_devices" onclick="showMainTab('devices')">📱 Cihazlar &amp; Eşleşmeler</button>
     <button class="main-tab" id="mainTab_requests" onclick="showMainTab('requests')">📋 Talepler <span class="req-dot hidden" id="requestsDot">0</span></button>
-    <button class="main-tab" id="mainTab_devices" onclick="showMainTab('devices')">📱 Cihazlar</button>
   </div>
 
   <div id="tabPanel_ops">
@@ -263,7 +262,19 @@
     </div>
   </div>
 
-  <div id="tabPanel_pairs" class="hidden">
+  <div id="tabPanel_requests" class="hidden">
+    <div class="card">
+      <h2>🔐 Şifre Sıfırlama Talepleri</h2>
+      <div id="resetRequestsList" class="empty">Bekleyen talep yok.</div>
+    </div>
+
+    <div class="card">
+      <h2>👤 Acil Kişi Talepleri</h2>
+      <div id="contactReqGlobalList" class="empty">Bekleyen talep yok.</div>
+    </div>
+  </div>
+
+  <div id="tabPanel_devices" class="hidden">
     <div class="card">
       <h2>Yeni Eşleştirme Oluştur</h2>
       <div class="row">
@@ -281,21 +292,7 @@
       <h2>Aktif Eşleşmeler</h2>
       <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
     </div>
-  </div>
 
-  <div id="tabPanel_requests" class="hidden">
-    <div class="card">
-      <h2>🔐 Şifre Sıfırlama Talepleri</h2>
-      <div id="resetRequestsList" class="empty">Bekleyen talep yok.</div>
-    </div>
-
-    <div class="card">
-      <h2>👤 Acil Kişi Talepleri</h2>
-      <div id="contactReqGlobalList" class="empty">Bekleyen talep yok.</div>
-    </div>
-  </div>
-
-  <div id="tabPanel_devices" class="hidden">
     <div class="card">
       <h2>Kayıtlı Cihazlar</h2>
       <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
@@ -666,7 +663,7 @@ function feedSeverity(e) {
   return 'normal';
 }
 
-const MAIN_TABS = ['ops', 'pairs', 'requests', 'devices'];
+const MAIN_TABS = ['ops', 'devices', 'requests'];
 
 function showMainTab(name) {
   MAIN_TABS.forEach(t => {
@@ -1108,6 +1105,16 @@ function checkLiveEvents() {
   showNotif(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : e.type === 'battery_critical' ? '🔴 Pil Kritik — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
     body: `${eventPairLabel(e)} — ${eventLine(e)}`,
   });
+  // Yeni gelen acil bir olay varsa Canlı Akış'ı elle tıklamaya gerek
+  // kalmadan doğrudan açıp göster; eski olaylar yine gizli kalıp
+  // tıklanınca açılmaya devam eder.
+  if (alertable.some(ev => feedSeverity(ev) === 'urgent')) {
+    liveFeedTab = 'urgent';
+    const dateInput = document.getElementById('feedDate');
+    if (dateInput) dateInput.value = todayDateStr();
+    renderLiveFeed();
+    document.getElementById('liveFeedPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 function checkTamper() {
