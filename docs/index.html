@@ -212,6 +212,44 @@
   .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px; padding:0 4px; }
   .table-wrap table { min-width:540px; }
 
+  /* Operasyon Panosu ve Cihazlar artık tablo yerine kart listesi —
+     "mesaj gönder"/"konum iste" gibi eylemler metnin arasına sıkışmış
+     minik ikonlar yerine ayrı, etiketli butonlar olarak duruyor. */
+  .pair-card {
+    background:var(--surface-high); border:1px solid var(--border); border-radius:14px;
+    padding:16px; margin-bottom:12px; cursor:pointer; transition:border-color .15s ease;
+  }
+  .pair-card:hover { border-color:#2E3748; }
+  .pair-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:2px; }
+  .pair-card-status { display:flex; align-items:center; }
+  .pair-card-dist { font-size:12.5px; color:var(--text2); }
+  .pair-card-title { font-weight:800; font-size:14.5px; margin:6px 0 2px; }
+  .pair-card-sub { font-size:11px; color:var(--muted); margin-bottom:10px; }
+  .device-row {
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:11px 0; border-top:1px solid var(--border-soft); flex-wrap:wrap;
+  }
+  .device-row:first-of-type { border-top:none; padding-top:2px; }
+  .device-info { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .device-name { font-weight:700; font-size:13px; display:flex; align-items:center; gap:6px; }
+  .device-meta { font-size:11px; color:var(--text2); display:flex; gap:10px; flex-wrap:wrap; }
+  .device-meta .batt.low { font-weight:700; }
+  .device-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .action-btn {
+    display:inline-flex; align-items:center; gap:5px; padding:7px 10px; border-radius:9px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text2);
+    font-size:11px; font-weight:700; text-decoration:none; white-space:nowrap;
+    transition: background .12s ease, color .12s ease;
+  }
+  .action-btn:hover { background:var(--surface-hover); color:var(--text); }
+  .action-btn .ack-dot { margin-left:2px; }
+  .device-card {
+    background:var(--surface-high); border:1px solid var(--border); border-radius:14px;
+    padding:14px 16px; margin-bottom:10px;
+  }
+  .device-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .device-card-name { font-weight:800; font-size:13.5px; display:flex; align-items:center; gap:8px; }
+
   /* 💬/📞/📍 gibi satır içi ikon linkleri metin boyutunda tıklanabilir alana
      sahipti — parmakla dokunmayı zorlaştırıyordu. Hepsine tutarlı, dokunmaya
      uygun bir hedef alan veriyoruz. */
@@ -312,12 +350,7 @@
         <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
         <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
       </div>
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Durum</th><th>Vaka</th><th>Mesafe / Eşik</th><th>Son Olay</th><th>Son Konum</th><th>Pil</th><th>Cihazlar</th></tr></thead>
-        <tbody id="opsBody"><tr><td class="empty" colspan="7">Yükleniyor…</td></tr></tbody>
-      </table>
-      </div>
+      <div id="opsBody"><div class="empty">Yükleniyor…</div></div>
     </div>
 
     <div class="card">
@@ -375,12 +408,7 @@
     <div class="card">
       <h2>Kayıtlı Cihazlar</h2>
       <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>İsim</th><th>Rol</th><th>Durum</th><th>Son Konum</th><th>Pil</th><th>Eşleşme</th><th></th></tr></thead>
-        <tbody id="devicesBody"><tr><td class="empty" colspan="7">Yükleniyor…</td></tr></tbody>
-      </table>
-      </div>
+      <div id="devicesBody"><div class="empty">Yükleniyor…</div></div>
     </div>
   </div>
 
@@ -850,8 +878,34 @@ function ackDot(devId, field) {
   return `<span class="ack-dot ack-fail" title="Telefon yanıt vermedi — uygulama arka planda çalışmıyor olabilir (pil kısıtlaması, eski build, kapalı uygulama)."></span>`;
 }
 
+// Bir cihaz satırı: isim/çevrimiçi noktası + pil/konum bilgisi + net
+// etiketli eylem butonları (💬 Mesaj / 📍 Konum / 📞 Ara). Önceden bunlar
+// metnin ucuna sıkışmış çıplak ikonlardı, ayırt etmesi zordu.
+function deviceActionRow(icon, roleLabel, dev, devId, loc) {
+  const batt = typeof dev.battery === 'number' ? dev.battery : null;
+  const battClass = batt !== null && batt <= 30 ? 'batt low' : 'batt';
+  const nameSafe = escapeHtml(dev.name || '').replace(/'/g, "\\'");
+  const callBtn = (batt !== null && batt <= 30 && dev.phone)
+    ? `<a href="tel:${escapeHtml(dev.phone)}" class="action-btn" onclick="event.stopPropagation()" title="${escapeHtml(dev.phone)}">📞 Ara</a>` : '';
+  return `
+    <div class="device-row">
+      <div class="device-info">
+        <div class="device-name">${icon} ${escapeHtml(dev.name || roleLabel)}<span class="dot ${isOnline(dev) ? 'on' : 'off'}"></span></div>
+        <div class="device-meta">
+          <span class="${battClass}">🔋 ${batt !== null ? batt + '%' : '—'}</span>
+          <span>${loc?.ts ? '📍 ' + escapeHtml(timeAgo(loc.ts)) : '📍 konum yok'}</span>
+        </div>
+      </div>
+      <div class="device-actions">
+        <a href="javascript:void(0)" class="action-btn" onclick="event.stopPropagation(); openMsgModal('${devId}','${nameSafe}')">💬 Mesaj${ackDot(devId, 'adminMsg')}</a>
+        <a href="javascript:void(0)" class="action-btn" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍 Konum${ackDot(devId, 'locationRequest')}</a>
+        ${callBtn}
+      </div>
+    </div>`;
+}
+
 function renderOpsBoard(pairIds) {
-  const tbody = document.getElementById('opsBody');
+  const container = document.getElementById('opsBody');
   const q = (document.getElementById('opsSearch')?.value || '').trim().toLowerCase();
 
   let rows = pairIds.map(pid => Object.assign({ pairId: pid, label: pairLabel(pid) }, pairStatus(pid)));
@@ -859,40 +913,27 @@ function renderOpsBoard(pairIds) {
   rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (b.lastEvent?.ts || 0) - (a.lastEvent?.ts || 0));
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td class="empty" colspan="7">${q ? 'Eşleşme bulunamadı.' : 'Henüz eşleştirme yok.'}</td></tr>`;
+    container.innerHTML = `<div class="empty">${q ? 'Eşleşme bulunamadı.' : 'Henüz eşleştirme yok.'}</div>`;
     return;
   }
 
-  tbody.innerHTML = rows.map(r => {
+  container.innerHTML = rows.map(r => {
     const p = pairs[r.pairId];
     const pDev = devices[p.protectedDeviceId] || {};
     const tDev = devices[p.trackedDeviceId] || {};
     const distText = r.status === 'critical' && r.zone ? `🚫 ${escapeHtml(r.zone.label)}`
-      : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> / ${p.threshold}m`
-      : '—';
-    const pBatt = typeof pDev.battery === 'number' ? pDev.battery : null;
-    const tBatt = typeof tDev.battery === 'number' ? tDev.battery : null;
-    const callLink = (batt, phone) => (batt !== null && batt <= 30 && phone)
-      ? ` <a href="tel:${escapeHtml(phone)}" title="${escapeHtml(phone)} numarasını ara" onclick="event.stopPropagation()" class="icon-link">📞</a>` : '';
-    const msgLink = (devId, name) => ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="event.stopPropagation(); openMsgModal('${devId}', '${escapeHtml(name || '').replace(/'/g, "\\'")}')">💬</a>${ackDot(devId, 'adminMsg')}`;
-    const battCell = `
-      <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}${msgLink(p.protectedDeviceId, pDev.name)}
-      <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}${msgLink(p.trackedDeviceId, tDev.name)}
-    `;
-    const reqLink = (devId) => ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍</a>${ackDot(devId, 'locationRequest')}`;
-    const locCell = `
-      <span style="color:var(--text2);" title="Korunan">🛡️ ${r.pLoc?.ts ? escapeHtml(timeAgo(r.pLoc.ts)) : '—'}</span>${reqLink(p.protectedDeviceId)}
-      <span style="color:var(--text2); margin-left:8px;" title="Uzaklaştırılan">🎯 ${r.tLoc?.ts ? escapeHtml(timeAgo(r.tLoc.ts)) : '—'}</span>${reqLink(p.trackedDeviceId)}
-    `;
-    return `<tr class="ops-row" onclick="openDetail('${r.pairId}')">
-      <td><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></td>
-      <td>${escapeHtml(r.label)}</td>
-      <td>${distText}</td>
-      <td>${r.lastEvent ? escapeHtml(timeAgo(r.lastEvent.ts)) : '—'}</td>
-      <td style="font-size:11.5px;">${locCell}</td>
-      <td>${battCell}</td>
-      <td><span class="dot ${isOnline(pDev) ? 'on' : 'off'}" title="Korunan"></span><span class="dot ${isOnline(tDev) ? 'on' : 'off'}" title="Uzaklaştırılan"></span></td>
-    </tr>`;
+      : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> / ${p.threshold}m eşik`
+      : 'Mesafe bilinmiyor';
+    return `<div class="pair-card" onclick="openDetail('${r.pairId}')">
+      <div class="pair-card-head">
+        <div class="pair-card-status"><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></div>
+        <div class="pair-card-dist">${distText}</div>
+      </div>
+      <div class="pair-card-title">${escapeHtml(r.label)}</div>
+      <div class="pair-card-sub">Son olay: ${r.lastEvent ? escapeHtml(timeAgo(r.lastEvent.ts)) : '—'}</div>
+      ${deviceActionRow('🛡️', 'Korunan', pDev, p.protectedDeviceId, r.pLoc)}
+      ${deviceActionRow('🎯', 'Uzaklaştırılan', tDev, p.trackedDeviceId, r.tLoc)}
+    </div>`;
   }).join('');
 }
 
@@ -968,26 +1009,34 @@ function render() {
 
   const body = document.getElementById('devicesBody');
   if (ids.length === 0) {
-    body.innerHTML = '<tr><td class="empty" colspan="7">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</td></tr>';
+    body.innerHTML = '<div class="empty">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</div>';
   } else {
     body.innerHTML = ids.map(id => {
       const d = devices[id];
       const online = isOnline(d);
       const partners = partnerNames(id);
-      const battCallLink = (d.battery <= 30 && d.phone) ? ` <a href="tel:${escapeHtml(d.phone)}" title="${escapeHtml(d.phone)} numarasını ara" class="icon-link">📞</a>` : '';
-      const devMsgLink = ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>${ackDot(id, 'adminMsg')}`;
-      const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}${devMsgLink}` : `<span class="batt">—</span>${devMsgLink}`;
-      const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : '—';
-      const reqBtn = ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="requestLocationNow('${id}')">📍</a>${ackDot(id, 'locationRequest')}`;
-      return `<tr>
-        <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
-        <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>
-        <td><span class="dot ${online ? 'on' : 'off'}"></span>${online ? 'Çevrimiçi' : 'Çevrimdışı'}</td>
-        <td>${escapeHtml(lastLoc)}${reqBtn}</td>
-        <td>${batt}</td>
-        <td>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : '<span style="color:var(--muted)">Eşleşmedi</span>'}</td>
-        <td><button class="secondary" onclick="deleteDevice('${id}')">Sil</button></td>
-      </tr>`;
+      const battClass = typeof d.battery === 'number' && d.battery <= 30 ? 'batt low' : 'batt';
+      const battText = typeof d.battery === 'number' ? `🔋 ${d.battery}%` : '🔋 —';
+      const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : 'konum yok';
+      const nameSafe = escapeHtml(d.name || '').replace(/'/g, "\\'");
+      const callBtn = (d.battery <= 30 && d.phone)
+        ? `<a href="tel:${escapeHtml(d.phone)}" class="action-btn" title="${escapeHtml(d.phone)}">📞 Ara</a>` : '';
+      return `<div class="device-card">
+        <div class="device-card-head">
+          <div class="device-card-name">${escapeHtml(d.name || '—')}<span class="dot ${online ? 'on' : 'off'}"></span><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></div>
+          <button class="secondary" onclick="deleteDevice('${id}')">Sil</button>
+        </div>
+        <div class="device-meta" style="margin-bottom:10px;">
+          <span class="${battClass}">${battText}</span>
+          <span>📍 ${escapeHtml(lastLoc)}</span>
+          <span>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : 'Eşleşmedi'}</span>
+        </div>
+        <div class="device-actions">
+          <a href="javascript:void(0)" class="action-btn" onclick="openMsgModal('${id}','${nameSafe}')">💬 Mesaj Gönder${ackDot(id, 'adminMsg')}</a>
+          <a href="javascript:void(0)" class="action-btn" onclick="requestLocationNow('${id}')">📍 Konum İste${ackDot(id, 'locationRequest')}</a>
+          ${callBtn}
+        </div>
+      </div>`;
     }).join('');
   }
 
