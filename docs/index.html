@@ -48,16 +48,43 @@
     background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1000px; margin: 0 auto; padding: 36px 20px 90px; }
-  .header { display:flex; align-items:center; gap:14px; margin-bottom: 18px; padding-bottom:18px; border-bottom:1px solid var(--border); }
+  .app-shell { display:flex; min-height:100vh; align-items:flex-start; }
+  .sidebar {
+    width:230px; flex-shrink:0; position:sticky; top:0; height:100vh;
+    display:flex; flex-direction:column; background:var(--surface);
+    border-right:1px solid var(--border); padding:22px 14px;
+  }
+  .brand { display:flex; align-items:center; gap:11px; padding:0 8px 20px; margin-bottom:14px; border-bottom:1px solid var(--border); }
   .logo {
-    width:42px; height:42px; border-radius:13px; font-size:19px;
+    width:38px; height:38px; border-radius:12px; font-size:17px;
     background: var(--danger-soft);
     border:1px solid rgba(239,68,68,.25);
-    display:flex; align-items:center; justify-content:center;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
   }
+  .brand-name { font-size:15px; letter-spacing:2px; font-weight:800; color:var(--text); line-height:1.3; }
+  .brand-tag { font-size:10.5px; color:var(--muted); letter-spacing:.3px; }
   h1 { font-size:19px; letter-spacing:2.5px; font-weight:800; margin:0; color:var(--text); }
   .subtitle { color:var(--text2); font-size:13.5px; margin: 6px 0 24px; display:flex; align-items:center; }
+  .sidenav { display:flex; flex-direction:column; gap:3px; flex:1; }
+  .nav-item {
+    display:flex; align-items:center; gap:11px; width:100%; text-align:left;
+    background:transparent; color:var(--text2); border:none; box-shadow:none;
+    padding:11px 12px; font-size:13.5px; font-weight:600; border-radius:var(--radius-sm);
+    position:relative; transform:none !important;
+  }
+  .nav-item:hover { background:var(--surface-hover); filter:none; transform:none; }
+  .nav-item.active { background:rgba(59,130,246,.12); color:var(--text); font-weight:800; }
+  .nav-item.active .nav-icon { filter:none; }
+  .nav-icon { font-size:16px; line-height:1; }
+  .nav-label { flex:1; }
+  .nav-item .req-dot {
+    background:var(--danger); color:#fff; border-radius:100px; padding:1px 7px;
+    font-size:10.5px; font-weight:800;
+  }
+  .sidebar-footer { border-top:1px solid var(--border); padding-top:14px; margin-top:10px; display:flex; flex-direction:column; gap:10px; }
+  .live-status { display:flex; align-items:center; font-size:11.5px; color:var(--text2); padding:0 8px; }
+  .nav-notif-btn { width:100%; justify-content:center; display:flex; }
+  .main-content { flex:1; min-width:0; padding:30px 32px 90px; max-width:1180px; }
   #errBanner, #tamperBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
   #errBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.35); color:var(--danger); }
   #tamperBanner { background:var(--warning-soft); border:1px solid rgba(245,158,11,.35); color:var(--warning); }
@@ -180,15 +207,6 @@
   .feed-tab.normal.active { background:var(--safe-soft); color:var(--safe); border-color:rgba(34,197,94,.4); }
   .feed-tab.normal.active .cnt { background:var(--safe); color:#fff; }
   #liveFeedPanel { margin-top:14px; }
-  .main-tabs { display:flex; gap:6px; margin-bottom:20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
-  .main-tab {
-    background:transparent; color:var(--text2); border:none; box-shadow:none; border-radius:0;
-    padding:12px 16px; font-size:13.5px; display:flex; align-items:center; gap:8px;
-    border-bottom:2px solid transparent; margin-bottom:-1px;
-  }
-  .main-tab:hover { background:var(--surface-hover); filter:none; transform:none; }
-  .main-tab.active { color:var(--text); border-bottom-color:var(--danger); font-weight:800; }
-  .main-tab .req-dot { background:var(--danger); color:#fff; border-radius:100px; padding:1px 8px; font-size:11px; font-weight:800; }
 
   /* Tablolar dar ekranlarda sıkışıp okunmaz olmak yerine yatay kaysın. */
   .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px; padding:0 4px; }
@@ -208,24 +226,29 @@
   .ack-dot.ack-pending { background:var(--warning); animation: pulse 1s ease-in-out infinite; }
   .ack-dot.ack-fail { background:var(--danger); }
 
-  /* Sekmeler arasında geçiş her zaman bir dokunuş uzaklıkta olsun diye,
-     uzun bir paneli kaydırırken bile üstte sabit kalır. */
-  .main-tabs {
-    position:sticky; top:0; z-index:40; background:var(--bg);
-    padding-top:10px; margin-top:-10px;
-  }
-
-  @media (max-width: 720px) {
-    .wrap { padding: 18px 12px 70px; }
-    .header { gap:10px; }
+  @media (max-width: 880px) {
+    .app-shell { flex-direction:column; }
+    .sidebar {
+      position:fixed; top:auto; bottom:0; left:0; right:0; width:100%; height:auto;
+      flex-direction:row; align-items:center; padding:6px 10px;
+      border-right:none; border-top:1px solid var(--border); z-index:100;
+      box-shadow: 0 -4px 20px rgba(0,0,0,.35);
+    }
+    .brand { display:none; }
+    .sidenav { flex-direction:row; flex:1; gap:2px; }
+    .nav-item { flex-direction:column; flex:1; padding:7px 2px 6px; gap:3px; border-radius:10px; }
+    .nav-label { flex:none; font-size:9.5px; text-align:center; line-height:1.2; }
+    .nav-icon { font-size:17px; }
+    .nav-item .req-dot { position:absolute; top:2px; right:14%; padding:0 5px; font-size:9px; }
+    .sidebar-footer { flex-direction:row; border-top:none; padding-top:0; margin-top:0; gap:6px; }
+    .live-status { display:none; }
+    .nav-notif-btn { width:auto; padding:9px; }
+    .nav-notif-btn .notif-label { display:none; }
+    .main-content { padding:18px 12px 84px; }
     h1 { font-size:15.5px; letter-spacing:1.5px; }
-    button#notifBtn { padding:8px 12px; font-size:12px; }
     .stats-row { grid-template-columns: repeat(2, 1fr); gap:10px; margin-bottom:16px; }
     .stat-card { padding:13px 14px; }
     .card { padding:15px; border-radius:15px; margin-bottom:14px; }
-    .main-tabs { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; gap:2px; }
-    .main-tabs::-webkit-scrollbar { display:none; }
-    .main-tab { padding:10px 12px; font-size:12.5px; white-space:nowrap; flex-shrink:0; }
     table { font-size:12px; }
     th, td { padding:9px 7px; }
     .row[style*="space-between"] { align-items:flex-start; }
@@ -251,15 +274,28 @@
   </div>
 </div>
 
-<div class="wrap" id="app" style="display:none;">
-<div id="dashboardView">
-  <div class="header">
+<div class="app-shell" id="app" style="display:none;">
+<aside class="sidebar">
+  <div class="brand">
     <div class="logo">📡</div>
-    <h1>UZAKDUR ADMIN</h1>
-    <div style="flex:1;"></div>
-    <button class="secondary" id="notifBtn" onclick="enableNotifications()">🔔 Bildirimleri Aç</button>
+    <div>
+      <div class="brand-name">UZAKDUR</div>
+      <div class="brand-tag">Yönetici Paneli</div>
+    </div>
   </div>
-  <div class="subtitle"><span id="liveDot"></span>Canlı — cihazları eşleştir, alarm mesafesini ayarla, mesafe taleplerini yönet.</div>
+  <nav class="sidenav">
+    <button class="nav-item" id="mainTab_ops" onclick="showMainTab('ops')"><span class="nav-icon">🎯</span><span class="nav-label">Operasyon</span></button>
+    <button class="nav-item" id="mainTab_devices" onclick="showMainTab('devices')"><span class="nav-icon">📱</span><span class="nav-label">Cihazlar &amp; Eşleşmeler</span></button>
+    <button class="nav-item" id="mainTab_requests" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDot">0</span></button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="live-status"><span id="liveDot"></span>Canlı izleniyor</div>
+    <button class="secondary nav-notif-btn" id="notifBtn" onclick="enableNotifications()">🔔 <span class="notif-label">Bildirimleri Aç</span></button>
+  </div>
+</aside>
+
+<main class="main-content">
+<div id="dashboardView">
   <div id="errBanner"></div>
   <div id="tamperBanner"></div>
 
@@ -268,12 +304,6 @@
     <div class="stat-card"><div class="num" id="statOnline">0</div><div class="lbl">Çevrimiçi</div></div>
     <div class="stat-card"><div class="num" id="statPairs">0</div><div class="lbl">Eşleşme</div></div>
     <div class="stat-card"><div class="num" id="statAlarmsToday" style="color:var(--danger);">0</div><div class="lbl">Bugün Alarm</div></div>
-  </div>
-
-  <div class="main-tabs">
-    <button class="main-tab" id="mainTab_ops" onclick="showMainTab('ops')">🎯 Operasyon</button>
-    <button class="main-tab" id="mainTab_devices" onclick="showMainTab('devices')">📱 Cihazlar &amp; Eşleşmeler</button>
-    <button class="main-tab" id="mainTab_requests" onclick="showMainTab('requests')">📋 Talepler <span class="req-dot hidden" id="requestsDot">0</span></button>
   </div>
 
   <div id="tabPanel_ops">
@@ -356,7 +386,6 @@
 
   <div style="text-align:center; color:var(--muted); font-size:11px; padding:8px 0 4px;">Yusuf BAŞ tarafından üretilmiştir</div>
 </div>
-</div>
 
 <div id="caseView" class="hidden">
     <button class="secondary" onclick="closeDetail()" style="margin-bottom:16px;">← Panele Dön</button>
@@ -409,6 +438,8 @@
     </div>
     <div id="detailHistory" class="empty">Yükleniyor…</div>
     </div>
+</div>
+</main>
 </div>
 
 <div id="zonePickerOverlay">
@@ -745,6 +776,10 @@ function feedSeverity(e) {
 const MAIN_TABS = ['ops', 'devices', 'requests'];
 
 function showMainTab(name) {
+  // Sidebar navigasyonu artık vaka detayı açıkken de görünür kalıyor;
+  // bir sekmeye tıklamak her zaman panele dönsün.
+  document.getElementById('caseView').classList.add('hidden');
+  document.getElementById('dashboardView').classList.remove('hidden');
   MAIN_TABS.forEach(t => {
     document.getElementById(`tabPanel_${t}`).classList.toggle('hidden', t !== name);
     document.getElementById(`mainTab_${t}`).classList.toggle('active', t === name);
