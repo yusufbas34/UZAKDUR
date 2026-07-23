@@ -135,6 +135,15 @@ class _ProximityHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
+    // flutter_foreground_task bu callback'i ayrı bir Dart isolate'inde
+    // çalıştırır; flutter_local_notifications'ın o isolate'te de kendi
+    // initialize()'ı çağrılmadan .show() çağrıları sessizce hiçbir şey
+    // göstermez (Android bildirim kanalı OS seviyesinde kalıcı olsa da,
+    // eklentinin Dart-native köprüsü isolate başına ayrıdır). Bu olmadan
+    // alarmın sesi/titreşimi çalışıyor ama bildirim banner'ı hiç
+    // görünmüyordu — aynı sebep pil/admin mesajı bildirimlerini de
+    // etkiliyordu.
+    await NotificationService.init();
     _deviceId = await FlutterForegroundTask.getData<String>(key: 'deviceId') ?? '';
     _posSub = LocationService.startLocationStream().listen((pos) async {
       _myLat = pos.latitude;
