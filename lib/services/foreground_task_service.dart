@@ -120,6 +120,7 @@ class _ProximityHandler extends TaskHandler {
       _myLon = pos.longitude;
       await LocationService.writeLocation(_deviceId, pos.latitude, pos.longitude);
       await FirebaseDatabase.instance.ref('devices/$_deviceId/locationRequest/ackTs').set(ServerValue.timestamp);
+      await NotificationService.showLocationRequestNotice();
     } catch (_) {}
   }
 

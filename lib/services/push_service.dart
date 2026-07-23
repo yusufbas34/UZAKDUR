@@ -3,6 +3,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'location_service.dart';
+import 'notification_service.dart';
 
 // Sunucu (Apps Script), bir cihazın konumu ~30 dakikadır güncellenmemişse
 // bu "type: request_location" veri mesajını FCM ile gönderir. Bu, garantili
@@ -28,6 +29,11 @@ Future<void> _handleLocationRequest(RemoteMessage message) async {
     // Admin panelin bu isteğin FCM (uygulama arka planda/kapalıyken) yoluyla
     // gerçekten karşılandığını görebilmesi için.
     await FirebaseDatabase.instance.ref('devices/$deviceId/locationRequest/ackTs').set(ServerValue.timestamp);
+    // FCM arka plan işleyicisi de kendi ayrı isolate'inde çalışır —
+    // bildirim eklentisi burada da initialize edilmeden .show() sessizce
+    // hiçbir şey göstermez.
+    await NotificationService.init();
+    await NotificationService.showLocationRequestNotice();
   } catch (_) {
     // Sessiz başarısızlık: pencere kapanmış, konum servisi kapalı ya da
     // izin yoksa burada yapabileceğimiz bir şey yok — bir sonraki normal

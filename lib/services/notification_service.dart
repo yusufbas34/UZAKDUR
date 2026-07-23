@@ -66,6 +66,21 @@ class NotificationService {
     );
   }
 
+  // Konum isteği sessizce karşılanmasın — kullanıcı bunu görebilsin diye
+  // (uygulamanın "gizlice takip eden" değil, şeffaf/bilgilendiren bir araç
+  // olması ilkesiyle tutarlı).
+  static Future<void> showLocationRequestNotice() async {
+    await _plugin.show(
+      105,
+      '📍 Konum İstendi',
+      'Yönetici konumunu talep etti, anlık konumun paylaşıldı.',
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_admin_msg', 'UZAKDUR Admin Mesajı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
+  }
+
   static Future<void> showBatteryWarning(int level, {required bool critical}) async {
     await _plugin.show(
       critical ? 103 : 102,
