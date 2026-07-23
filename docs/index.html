@@ -201,6 +201,10 @@
     font-size:14px; vertical-align:middle; transition: background .12s ease;
   }
   .icon-link:hover, .icon-link:active { background:var(--surface-hover); }
+  .ack-dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-left:1px; vertical-align:middle; }
+  .ack-dot.ack-ok { background:var(--safe); }
+  .ack-dot.ack-pending { background:var(--warning); animation: pulse 1s ease-in-out infinite; }
+  .ack-dot.ack-fail { background:var(--danger); }
 
   /* Sekmeler arasında geçiş her zaman bir dokunuş uzaklıkta olsun diye,
      uzun bir paneli kaydırırken bile üstte sabit kalır. */
@@ -791,6 +795,20 @@ function renderLiveFeed() {
   }).join('') : '<div class="empty">Bu kategoride olay yok.</div>';
 }
 
+// "Gönderildi" ile "telefona gerçekten ulaştı" farklı şeyler — admin panel
+// bunu şimdiye kadar hiç ayırt edemiyordu. Uygulama isteği işleyince
+// devices/{id}/{field}/ackTs yazıyor; burada gönderim zamanıyla karşılaştırıp
+// ✅ iletildi / ⏳ bekleniyor / ❌ yanıt yok olarak gösteriyoruz.
+function ackDot(devId, field) {
+  const node = devices[devId]?.[field];
+  if (!node || !node.ts) return '';
+  const acked = node.ackTs && node.ackTs >= node.ts;
+  if (acked) return `<span class="ack-dot ack-ok" title="İletildi (${escapeHtml(timeAgo(node.ackTs))})"></span>`;
+  const ageMs = Date.now() - node.ts;
+  if (ageMs < 90000) return `<span class="ack-dot ack-pending" title="Gönderildi, telefondan yanıt bekleniyor…"></span>`;
+  return `<span class="ack-dot ack-fail" title="Telefon yanıt vermedi — uygulama arka planda çalışmıyor olabilir (pil kısıtlaması, eski build, kapalı uygulama)."></span>`;
+}
+
 function renderOpsBoard(pairIds) {
   const tbody = document.getElementById('opsBody');
   const q = (document.getElementById('opsSearch')?.value || '').trim().toLowerCase();
@@ -815,12 +833,12 @@ function renderOpsBoard(pairIds) {
     const tBatt = typeof tDev.battery === 'number' ? tDev.battery : null;
     const callLink = (batt, phone) => (batt !== null && batt <= 30 && phone)
       ? ` <a href="tel:${escapeHtml(phone)}" title="${escapeHtml(phone)} numarasını ara" onclick="event.stopPropagation()" class="icon-link">📞</a>` : '';
-    const msgLink = (devId, name) => ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="event.stopPropagation(); openMsgModal('${devId}', '${escapeHtml(name || '').replace(/'/g, "\\'")}')">💬</a>`;
+    const msgLink = (devId, name) => ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="event.stopPropagation(); openMsgModal('${devId}', '${escapeHtml(name || '').replace(/'/g, "\\'")}')">💬</a>${ackDot(devId, 'adminMsg')}`;
     const battCell = `
       <span class="${pBatt !== null && pBatt <= 30 ? 'batt low' : 'batt'}" title="Korunan">🛡️ ${pBatt !== null ? pBatt + '%' : '—'}</span>${callLink(pBatt, pDev.phone)}${msgLink(p.protectedDeviceId, pDev.name)}
       <span class="${tBatt !== null && tBatt <= 30 ? 'batt low' : 'batt'}" title="Uzaklaştırılan" style="margin-left:8px;">🎯 ${tBatt !== null ? tBatt + '%' : '—'}</span>${callLink(tBatt, tDev.phone)}${msgLink(p.trackedDeviceId, tDev.name)}
     `;
-    const reqLink = (devId) => ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍</a>`;
+    const reqLink = (devId) => ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍</a>${ackDot(devId, 'locationRequest')}`;
     const locCell = `
       <span style="color:var(--text2);" title="Korunan">🛡️ ${r.pLoc?.ts ? escapeHtml(timeAgo(r.pLoc.ts)) : '—'}</span>${reqLink(p.protectedDeviceId)}
       <span style="color:var(--text2); margin-left:8px;" title="Uzaklaştırılan">🎯 ${r.tLoc?.ts ? escapeHtml(timeAgo(r.tLoc.ts)) : '—'}</span>${reqLink(p.trackedDeviceId)}
@@ -916,10 +934,10 @@ function render() {
       const online = isOnline(d);
       const partners = partnerNames(id);
       const battCallLink = (d.battery <= 30 && d.phone) ? ` <a href="tel:${escapeHtml(d.phone)}" title="${escapeHtml(d.phone)} numarasını ara" class="icon-link">📞</a>` : '';
-      const devMsgLink = ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>`;
+      const devMsgLink = ` <a href="javascript:void(0)" class="icon-link" title="Mesaj gönder" onclick="openMsgModal('${id}', '${escapeHtml(d.name || '').replace(/'/g, "\\'")}')">💬</a>${ackDot(id, 'adminMsg')}`;
       const batt = typeof d.battery === 'number' ? `<span class="batt ${d.battery <= 30 ? 'low' : ''}">🔋 ${d.battery}%</span>${battCallLink}${devMsgLink}` : `<span class="batt">—</span>${devMsgLink}`;
       const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : '—';
-      const reqBtn = ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="requestLocationNow('${id}')">📍</a>`;
+      const reqBtn = ` <a href="javascript:void(0)" class="icon-link" title="Konum iste" onclick="requestLocationNow('${id}')">📍</a>${ackDot(id, 'locationRequest')}`;
       return `<tr>
         <td>${escapeHtml(d.name || '—')}${d.username ? `<div style="color:var(--muted); font-size:11px;">@${escapeHtml(d.username)}</div>` : ''}</td>
         <td><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></td>

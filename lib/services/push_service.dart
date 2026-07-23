@@ -1,3 +1,4 @@
+import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,6 +25,9 @@ Future<void> _handleLocationRequest(RemoteMessage message) async {
       timeLimit: const Duration(seconds: 15),
     );
     await LocationService.writeLocation(deviceId, pos.latitude, pos.longitude);
+    // Admin panelin bu isteğin FCM (uygulama arka planda/kapalıyken) yoluyla
+    // gerçekten karşılandığını görebilmesi için.
+    await FirebaseDatabase.instance.ref('devices/$deviceId/locationRequest/ackTs').set(ServerValue.timestamp);
   } catch (_) {
     // Sessiz başarısızlık: pencere kapanmış, konum servisi kapalı ya da
     // izin yoksa burada yapabileceğimiz bir şey yok — bir sonraki normal

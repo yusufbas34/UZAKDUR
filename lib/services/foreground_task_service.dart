@@ -90,6 +90,10 @@ class _ProximityHandler extends TaskHandler {
       if (ts > lastTs) {
         await NotificationService.showAdminMessage(text);
         await prefs.setInt('admin_msg_last_ts', ts);
+        // Admin panelin "gönderildi mi, telefona ulaştı mı" farkını
+        // görebilmesi için — aksi halde iletim gerçekten başarısız olduğunda
+        // bunu tahmin etmekten başka yol yok.
+        await FirebaseDatabase.instance.ref('devices/$_deviceId/adminMsg/ackTs').set(ServerValue.timestamp);
       }
     } catch (_) {}
   }
@@ -115,6 +119,7 @@ class _ProximityHandler extends TaskHandler {
       _myLat = pos.latitude;
       _myLon = pos.longitude;
       await LocationService.writeLocation(_deviceId, pos.latitude, pos.longitude);
+      await FirebaseDatabase.instance.ref('devices/$_deviceId/locationRequest/ackTs').set(ServerValue.timestamp);
     } catch (_) {}
   }
 
