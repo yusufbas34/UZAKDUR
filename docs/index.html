@@ -1021,6 +1021,8 @@ function render() {
       const nameSafe = escapeHtml(d.name || '').replace(/'/g, "\\'");
       const callBtn = (d.battery <= 30 && d.phone)
         ? `<a href="tel:${escapeHtml(d.phone)}" class="action-btn" title="${escapeHtml(d.phone)}">📞 Ara</a>` : '';
+      const debugErr = d.debugError?.msg
+        ? `<div style="font-size:11px; color:var(--danger); margin-top:8px;">⚠ Telefondan hata raporu (${escapeHtml(timeAgo(d.debugError.ts))}): ${escapeHtml(d.debugError.msg)}</div>` : '';
       return `<div class="device-card">
         <div class="device-card-head">
           <div class="device-card-name">${escapeHtml(d.name || '—')}<span class="dot ${online ? 'on' : 'off'}"></span><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></div>
@@ -1036,6 +1038,7 @@ function render() {
           <a href="javascript:void(0)" class="action-btn" onclick="requestLocationNow('${id}')">📍 Konum İste${ackDot(id, 'locationRequest')}</a>
           ${callBtn}
         </div>
+        ${debugErr}
       </div>`;
     }).join('');
   }

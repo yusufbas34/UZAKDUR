@@ -95,6 +95,17 @@ class _ProximityHandler extends TaskHandler {
         // bunu tahmin etmekten başka yol yok.
         await FirebaseDatabase.instance.ref('devices/$_deviceId/adminMsg/ackTs').set(ServerValue.timestamp);
       }
+    } catch (e) {
+      await _reportDebugError('adminMsg: $e');
+    }
+  }
+
+  // Sessiz catch(_) blokları neyin başarısız olduğunu görmemizi
+  // imkansızlaştırıyordu — gerçek hatayı Firebase'e yazıp admin panelde
+  // görünür kılıyoruz (tahmin yerine kanıt).
+  Future<void> _reportDebugError(String msg) async {
+    try {
+      await FirebaseDatabase.instance.ref('devices/$_deviceId/debugError').set({'msg': msg, 'ts': ServerValue.timestamp});
     } catch (_) {}
   }
 
@@ -121,7 +132,9 @@ class _ProximityHandler extends TaskHandler {
       await LocationService.writeLocation(_deviceId, pos.latitude, pos.longitude);
       await FirebaseDatabase.instance.ref('devices/$_deviceId/locationRequest/ackTs').set(ServerValue.timestamp);
       await NotificationService.showLocationRequestNotice();
-    } catch (_) {}
+    } catch (e) {
+      await _reportDebugError('locationRequest: $e');
+    }
   }
 
   bool _shouldFullCheck() {
