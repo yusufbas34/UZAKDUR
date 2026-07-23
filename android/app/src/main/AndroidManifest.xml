@@ -20,6 +20,18 @@
             <action android:name="android.intent.action.SENDTO"/>
             <data android:scheme="mailto"/>
         </intent>
+        <!-- Güncelleme bildirimi ve tel: arama linklerinin açılabilmesi için:
+             Android 11+ (API 30+) paket görünürlük kısıtlaması yüzünden bu
+             beyan olmadan canLaunchUrl() sessizce false döner ve dokunma
+             hiçbir şey yapmaz. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="tel"/>
+        </intent>
     </queries>
 
     <application
