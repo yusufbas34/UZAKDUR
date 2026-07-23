@@ -12,7 +12,6 @@ import 'notification_service.dart';
 void startCallback() => FlutterForegroundTask.setTaskHandler(_ProximityHandler());
 
 class _ProximityHandler extends TaskHandler {
-  StreamSubscription<Position>? _posSub;
   double? _myLat, _myLon;
   String _deviceId = '';
   bool _alarming = false;
@@ -159,7 +158,25 @@ class _ProximityHandler extends TaskHandler {
     // etkiliyordu.
     await NotificationService.init();
     _deviceId = await FlutterForegroundTask.getData<String>(key: 'deviceId') ?? '';
-    _posSub = LocationService.startLocationStream().listen((pos) async {
+    await _pollLocation();
+  }
+
+  // Arka planda GPS'i sürekli açık tutmak (stream) en çok pil tüketen ve
+  // OEM'lerin (Honor/Huawei/Xiaomi vb.) arka plan servisini agresif şekilde
+  // öldürmesine en çok sebep olan davranış. Bunun yerine ilk konumu hemen
+  // alıp sonrasında sadece 5 dakikada bir tek seferlik ölçüm yapıyoruz —
+  // pil tüketimi çok daha düşük, servisin hayatta kalma ihtimali daha
+  // yüksek. Bedeli: arka planda alarm hassasiyeti artık ~5dk'lık bir
+  // aralığa bağlı (uygulama ekranı açıkken bu geçerli değil, oradaki canlı
+  // harita akışı ayrı ve sürekli).
+  static const _locationPollTicks = 60; // 60 * 5sn = 5 dakika
+
+  Future<void> _pollLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 20),
+      );
       _myLat = pos.latitude;
       _myLon = pos.longitude;
       await LocationService.writeLocation(_deviceId, pos.latitude, pos.longitude);
@@ -167,7 +184,7 @@ class _ProximityHandler extends TaskHandler {
         notificationTitle: 'UZAKDUR aktif',
         notificationText: 'GPS alınıyor…',
       );
-    });
+    } catch (_) {}
   }
 
   @override
@@ -186,6 +203,7 @@ class _ProximityHandler extends TaskHandler {
     await _checkAdminMessage();
     await _checkLocationRequest();
     _tick++;
+    if (_tick % _locationPollTicks == 0) await _pollLocation();
     if (_tick % 12 == 0) { // ~every 60s at 5s interval
       try {
         final level = await _battery.batteryLevel;
@@ -300,7 +318,6 @@ class _ProximityHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, SendPort? sendPort) async {
-    await _posSub?.cancel();
     await LocationService.setOnline(_deviceId, false);
     await NotificationService.stopAlarm();
   }
