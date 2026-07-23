@@ -503,7 +503,7 @@ function tryLogin() {
   if (val === ADMIN_PASSWORD) {
     try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
     document.getElementById('gate').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
+    document.getElementById('app').style.display = 'flex';
     boot();
   } else {
     document.getElementById('pwErr').textContent = 'Hatalı şifre';
