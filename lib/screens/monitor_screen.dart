@@ -745,7 +745,25 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) _stop();
-    if (state == AppLifecycleState.resumed) _checkNotifPermission();
+    if (state == AppLifecycleState.resumed) {
+      _checkNotifPermission();
+      _ensureForegroundServiceAlive();
+    }
+  }
+
+  // Servis OEM pil yönetimi tarafından öldürülmüşse (Honor/Huawei/Xiaomi vb.
+  // "Kısıtlama yok" ayarlanmadıkça sık görülür), _fgStarted bayrağı hâlâ
+  // true kalıp bir daha başlatma denemesi yapılmasını engelliyordu. Uygulama
+  // her öne geldiğinde gerçek servis durumunu kontrol edip gerekirse zorla
+  // yeniden başlatıyoruz — WorkManager bekçisinin ~15dk'lık aralığını
+  // beklemek yerine anında toparlanma şansı.
+  Future<void> _ensureForegroundServiceAlive() async {
+    if (_pairs.isEmpty) return;
+    final running = await FlutterForegroundTask.isRunningService;
+    if (!running) {
+      _fgStarted = true;
+      await ForegroundTaskService.start(deviceId: widget.deviceId);
+    }
   }
 
   @override
