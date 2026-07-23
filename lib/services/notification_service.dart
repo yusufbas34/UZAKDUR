@@ -19,6 +19,14 @@ class NotificationService {
   static Future<void> init() async {
     await _plugin.initialize(const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher')));
+    // Android 13+ (API 33) bildirim gösterebilmek için açık kullanıcı izni
+    // istiyor; manifest'teki POST_NOTIFICATIONS izni tek başına yeterli
+    // değil. Bu istenmeden alarm/pil/mesaj bildirimleri sessizce hiç
+    // gösterilmez (alarmın sesi/titreşimi bu izne bağlı değil, o yüzden
+    // "alarm çalışıyor ama bildirim hiç gelmiyor" hissi verir).
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(const AndroidNotificationChannel(
