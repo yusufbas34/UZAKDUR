@@ -77,6 +77,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   bool _panicSending = false;
   bool _disguised = false;
   UpdateInfo? _updateInfo;
+  bool _notifDenied = false;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
   final _battery = Battery();
@@ -115,6 +116,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     _alarmAnim = CurvedAnimation(parent: _alarmCtrl, curve: Curves.easeInOut);
     WidgetsBinding.instance.addObserver(this);
     ForegroundTaskService.init();
+    _checkNotifPermission();
     _start();
     if (_isProtected) {
       _loadDisguiseState();
@@ -125,6 +127,18 @@ class _MonitorScreenState extends State<MonitorScreen>
         return null;
       });
     }
+  }
+
+  // Bildirim izni sistemin ilk açılış diyaloğuyla reddedilirse (ya da
+  // kullanıcı fark etmeden kapatırsa) plugin bunu bir daha soramaz — Android
+  // bunu yalnızca Ayarlar üzerinden değiştirmeye izin verir. Bu yüzden
+  // durumu uygulama içinde görünür kılıp doğrudan ayar sayfasını açan bir
+  // yol sunuyoruz; aksi halde mesaj/pil/alarm bildirimleri hiç görünmez ve
+  // kullanıcının bunu fark etmesinin hiçbir yolu olmaz.
+  Future<void> _checkNotifPermission() async {
+    final status = await Permission.notification.status;
+    if (!mounted) return;
+    setState(() => _notifDenied = !status.isGranted);
   }
 
   Future<void> _loadDisguiseState() async {
@@ -731,6 +745,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) _stop();
+    if (state == AppLifecycleState.resumed) _checkNotifPermission();
   }
 
   @override
@@ -778,6 +793,7 @@ class _MonitorScreenState extends State<MonitorScreen>
             ),
             child: SafeArea(child: Column(children: [
               _buildTopBar(),
+              if (_notifDenied) _buildNotifBanner(),
               if (_updateInfo != null) _buildUpdateBanner(),
               if (_pairs.isNotEmpty) _buildPartnerStrip(),
               Expanded(child: _errorText != null
@@ -840,6 +856,21 @@ class _MonitorScreenState extends State<MonitorScreen>
         const SizedBox(width: 8),
         Expanded(child: Text('Yeni bir güncelleme var — indirmek için dokun', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.roleB))),
         Icon(Icons.chevron_right_rounded, color: AppColors.roleB, size: 18),
+      ]),
+    ),
+  );
+
+  Widget _buildNotifBanner() => GestureDetector(
+    onTap: () => openAppSettings(),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: AppColors.danger.withOpacity(0.14),
+      child: Row(children: [
+        Icon(Icons.notifications_off_rounded, color: AppColors.danger, size: 16),
+        const SizedBox(width: 8),
+        Expanded(child: Text('Bildirimler kapalı — mesaj/pil uyarıları hiç görünmez. Açmak için dokun', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.danger))),
+        Icon(Icons.chevron_right_rounded, color: AppColors.danger, size: 18),
       ]),
     ),
   );
