@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../firebase_options.dart';
 import 'location_service.dart';
 import 'notification_service.dart';
 
@@ -149,14 +151,21 @@ class _ProximityHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
-    // flutter_foreground_task bu callback'i ayrı bir Dart isolate'inde
-    // çalıştırır; flutter_local_notifications'ın o isolate'te de kendi
-    // initialize()'ı çağrılmadan .show() çağrıları sessizce hiçbir şey
-    // göstermez (Android bildirim kanalı OS seviyesinde kalıcı olsa da,
-    // eklentinin Dart-native köprüsü isolate başına ayrıdır). Bu olmadan
-    // alarmın sesi/titreşimi çalışıyor ama bildirim banner'ı hiç
-    // görünmüyordu — aynı sebep pil/admin mesajı bildirimlerini de
-    // etkiliyordu.
+    // KÖK SEBEP: flutter_foreground_task bu callback'i ayrı bir Dart
+    // isolate'inde çalıştırır — bu isolate'in Firebase'i main.dart'taki
+    // Firebase.initializeApp() çağrısından HABERİ YOK, kendi başına ayrıca
+    // initialize edilmesi gerekiyor. Bu satır olmadan bu isolate içindeki
+    // HER FirebaseDatabase çağrısı (serviceTick, heartbeat, adminMsg,
+    // locationRequest, hatta debugError'ın kendisi) "no Firebase App
+    // [DEFAULT]" hatasıyla patlıyordu — ve hepsi try/catch(_){}  içinde
+    // sessizce yutuluyordu. Bu, "servis hiç tick atmıyor" teşhisinin asıl
+    // sebebiydi: servis aslında BAŞLIYORDU, ama içindeki her Firebase
+    // işlemi ilk satırda sessizce başarısız oluyordu — OEM pil kısıtlaması
+    // hiç devreye girmeden.
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    // flutter_local_notifications'ın da aynı sebeple bu isolate'te kendi
+    // initialize()'ı gerekiyor (Android bildirim kanalı OS seviyesinde
+    // kalıcı olsa da, eklentinin Dart-native köprüsü isolate başına ayrı).
     await NotificationService.init();
     _deviceId = await FlutterForegroundTask.getData<String>(key: 'deviceId') ?? '';
     await _pollLocation();
@@ -362,14 +371,30 @@ class ForegroundTaskService {
     );
   }
 
+  // Servisin BAŞLATILMASI kendisi başarısız olabilir (ör. Android 14'te
+  // foreground service type izni eksikse, OEM bir kısıtlama uygularsa, ya
+  // da eklenti bir istisna fırlatırsa) — önceden bu, çağıran taraflarda
+  // sessizce yutuluyordu (fire-and-forget ya da boş catch), bu yüzden
+  // "servis hiç tick atmıyor" teşhisi konsa da GERÇEK sebep hiçbir zaman
+  // görünmüyordu. Artık gerçek istisna Firebase'e yazılıp admin panelde
+  // görünür — "başlatılamadı" ile "başladı ama sonra öldürüldü" birbirinden
+  // ayırt edilebiliyor.
   static Future<void> start({required String deviceId}) async {
-    await FlutterForegroundTask.saveData(key: 'deviceId', value: deviceId);
-    if (await FlutterForegroundTask.isRunningService) {
-      await FlutterForegroundTask.restartService();
-    } else {
-      await FlutterForegroundTask.startService(
-        notificationTitle: 'UZAKDUR Başlatıldı', notificationText: 'İzleme aktif', callback: startCallback,
-      );
+    try {
+      await FlutterForegroundTask.saveData(key: 'deviceId', value: deviceId);
+      if (await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.restartService();
+      } else {
+        await FlutterForegroundTask.startService(
+          notificationTitle: 'UZAKDUR Başlatıldı', notificationText: 'İzleme aktif', callback: startCallback,
+        );
+      }
+      await FirebaseDatabase.instance.ref('devices/$deviceId/serviceStartError').remove();
+    } catch (e) {
+      try {
+        await FirebaseDatabase.instance.ref('devices/$deviceId/serviceStartError')
+            .set({'msg': e.toString(), 'ts': ServerValue.timestamp});
+      } catch (_) {}
     }
   }
 

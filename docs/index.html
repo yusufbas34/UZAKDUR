@@ -1046,6 +1046,12 @@ function render() {
         ? `<a href="tel:${escapeHtml(d.phone)}" class="action-btn" title="${escapeHtml(d.phone)}">📞 Ara</a>` : '';
       const debugErr = d.debugError?.msg
         ? `<div style="font-size:11px; color:var(--danger); margin-top:8px;">⚠ Telefondan hata raporu (${escapeHtml(timeAgo(d.debugError.ts))}): ${escapeHtml(d.debugError.msg)}</div>` : '';
+      // debugError, servis TİKLEDİKTEN sonraki (mesaj/konum işleme) hataları
+      // yakalar — servis hiç BAŞLAYAMAMIŞSA bu hiç yazılmaz. serviceStartError
+      // tam olarak o boşluğu kapatıyor: servisi başlatma çağrısının kendisi
+      // patladıysa gerçek istisna burada görünür.
+      const startErr = d.serviceStartError?.msg
+        ? `<div style="font-size:11px; color:var(--danger); margin-top:4px;">🛑 Servis başlatılamadı (${escapeHtml(timeAgo(d.serviceStartError.ts))}): ${escapeHtml(d.serviceStartError.msg)}</div>` : '';
       return `<div class="device-card">
         <div class="device-card-head">
           <div class="device-card-name">${escapeHtml(d.name || '—')}<span class="dot ${online ? 'on' : 'off'}"></span><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></div>
@@ -1063,6 +1069,7 @@ function render() {
           ${callBtn}
         </div>
         ${debugErr}
+        ${startErr}
       </div>`;
     }).join('');
   }

@@ -1,7 +1,9 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../firebase_options.dart';
 import 'location_service.dart';
 import 'notification_service.dart';
 
@@ -12,6 +14,10 @@ import 'notification_service.dart';
 // derin Doze modu bu mesajın ulaşmasını engelleyebilir.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Bu işleyici de kendi ayrı isolate'inde çalışır — main.dart'taki
+  // Firebase.initializeApp()'ten haberi yok, kendi başına initialize
+  // edilmesi gerekiyor (bkz. foreground_task_service.dart'taki aynı sorun).
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await _handleLocationRequest(message);
 }
 

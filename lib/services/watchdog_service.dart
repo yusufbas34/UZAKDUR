@@ -3,6 +3,8 @@ import 'package:workmanager/workmanager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:firebase_core/firebase_core.dart';
+import '../firebase_options.dart';
 import '../models/roles.dart';
 import 'foreground_task_service.dart';
 
@@ -20,6 +22,11 @@ void watchdogCallbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     WidgetsFlutterBinding.ensureInitialized();
     try {
+      // WorkManager da kendi ayrı isolate'inde çalışır — bu görev servisi
+      // yeniden başlatırken (ForegroundTaskService.start) yazdığı
+      // serviceStartError teşhis kaydının çalışabilmesi için Firebase bu
+      // isolate'te de initialize edilmiş olmalı.
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       final prefs = await SharedPreferences.getInstance();
       final deviceId = prefs.getString('device_id');
       final role = prefs.getString('device_role');

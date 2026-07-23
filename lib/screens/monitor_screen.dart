@@ -295,7 +295,7 @@ class _MonitorScreenState extends State<MonitorScreen>
 
     if (_pairs.isNotEmpty && !_fgStarted) {
       _fgStarted = true;
-      ForegroundTaskService.start(deviceId: widget.deviceId);
+      ForegroundTaskService.start(deviceId: widget.deviceId).ignore();
     } else if (_pairs.isEmpty && _fgStarted) {
       _fgStarted = false;
       ForegroundTaskService.stop().ignore();
