@@ -5,6 +5,12 @@ import 'package:crypto/crypto.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 
+// Tam alarm (siren) her eşleşmede sabit — bir eşleşmenin admin'in
+// ayarladığı "eşik"i ne olursa olsun, siren en geç bu mesafede çalar. Eşik
+// artık sadece erken/titreşimli uyarının (caution) sınırını belirler
+// (eşiğin %60'ı), alarmın kendisini değil.
+const kAlarmDistanceMeters = 1000.0;
+
 class DeviceAccount {
   final String deviceId;
   final String name;

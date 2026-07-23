@@ -348,8 +348,12 @@ class _MonitorScreenState extends State<MonitorScreen>
       bool caution = false;
       if (_myLocation != null && otherLoc != null) {
         d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, otherLoc.lat, otherLoc.lon);
-        proximityAlarm = d < pair.threshold;
-        caution = !proximityAlarm && d < pair.threshold * 1.5;
+        // Tam alarm artık eşikten bağımsız, sabit 1000m güvenlik tabanı —
+        // admin ne kadar büyük bir eşik ayarlarsa ayarlasın siren en geç
+        // 1000m'de çalar. Eşik değeri bunun yerine erken/titreşimli uyarının
+        // (caution) sınırını belirler: eşiğin %60'ı.
+        proximityAlarm = d < kAlarmDistanceMeters;
+        caution = !proximityAlarm && pair.threshold > 0 && d < pair.threshold * 0.6;
       }
       if (caution) anyCaution = true;
 
@@ -410,6 +414,10 @@ class _MonitorScreenState extends State<MonitorScreen>
       NotificationService.stopAlarm();
       if (anyCaution && !_wasCaution) {
         HapticFeedback.mediumImpact();
+        // Bu erken uyarı sadece uzaklaştırılan tarafa gösterilir — metni
+        // ("...yaklaşmaktasınız...") doğrudan ona hitap ediyor, korunan
+        // tarafta anlamsız olurdu.
+        if (!_isProtected) NotificationService.showApproachWarning();
       }
       _wasCaution = anyCaution;
     }
@@ -465,7 +473,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     final markers = <Marker>{};
     final circles = <Circle>{};
     final polylines = <Polyline>{};
-    final threshold = _pair?.threshold ?? 100;
+    final cautionRadius = (_pair?.threshold ?? 0) * 0.6;
 
     if (_myLocation != null) {
       final pos = LatLng(_myLocation!.lat, _myLocation!.lon);
@@ -474,12 +482,22 @@ class _MonitorScreenState extends State<MonitorScreen>
         icon: BitmapDescriptor.defaultMarkerWithHue(_isProtected ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(title: '${widget.name} (Ben)'), zIndex: 2,
       ));
+      // Kırmızı çember: gerçek alarm sınırı, sabit (eşikten bağımsız).
+      // Turuncu çember: erken/titreşimli uyarının tetiklendiği sınır.
       circles.add(Circle(
-        circleId: const CircleId('threshold'), center: pos, radius: threshold,
+        circleId: const CircleId('threshold'), center: pos, radius: kAlarmDistanceMeters,
         fillColor: (_isAlarm ? AppColors.danger : AppColors.safe).withOpacity(0.08),
         strokeColor: (_isAlarm ? AppColors.danger : AppColors.safe).withOpacity(0.4),
         strokeWidth: 1,
       ));
+      if (cautionRadius > 0) {
+        circles.add(Circle(
+          circleId: const CircleId('caution'), center: pos, radius: cautionRadius,
+          fillColor: AppColors.warning.withOpacity(0.06),
+          strokeColor: AppColors.warning.withOpacity(0.35),
+          strokeWidth: 1,
+        ));
+      }
       if (_mapFollowsMe) _mapCtrl!.animateCamera(CameraUpdate.newLatLng(pos));
     }
 
@@ -596,7 +614,7 @@ class _MonitorScreenState extends State<MonitorScreen>
             },
           ),
           const SizedBox(height: 8),
-          Slider(value: value.clamp(20.0, 1000.0), min: 20, max: 1000, divisions: 98,
+          Slider(value: value.clamp(20.0, 5000.0), min: 20, max: 5000, divisions: 99,
               activeColor: AppColors.danger, inactiveColor: AppColors.border,
               onChanged: (v) => setSheet(() {
                 value = v;
@@ -604,7 +622,8 @@ class _MonitorScreenState extends State<MonitorScreen>
                 textCtrl.selection = TextSelection.collapsed(offset: textCtrl.text.length);
               })),
           const SizedBox(height: 4),
-          Text('Kaydırıcı 20-1000m arası; daha büyük bir değeri kutuya elle yazabilirsin.',
+          Text('Kaydırıcı 20-5000m arası; daha büyük bir değeri kutuya elle yazabilirsin. '
+              'Bu eşik, erken/titreşimli uyarının sınırıdır (%60\'ı) — tam alarm her zaman ${kAlarmDistanceMeters.round()}m\'de çalar.',
               style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled)),
           const SizedBox(height: 16),
           SizedBox(width: double.infinity, child: GestureDetector(
@@ -785,7 +804,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Color get _roleColor => _isProtected ? AppColors.roleB : AppColors.roleA;
-  Color get _statusColor => _isAlarm ? AppColors.danger : _distance != null && _pair != null && _distance! < _pair!.threshold * 1.5 ? AppColors.warning : AppColors.safe;
+  Color get _statusColor => _isAlarm ? AppColors.danger : _distance != null && _pair != null && _pair!.threshold > 0 && _distance! < _pair!.threshold * 0.6 ? AppColors.warning : AppColors.safe;
 
   Color _statusColorFor(String? status) {
     switch (status) {
@@ -990,7 +1009,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(_statusText, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: _isAlarm ? AppColors.danger : AppColors.textPrimary)),
-        Text('Eşik: ${_pair?.threshold.round() ?? '—'}m  •  5 sn\'de bir güncelleniyor'
+        Text('Uyarı sınırı: ${_pair?.threshold.round() ?? '—'}m  •  Alarm: ${kAlarmDistanceMeters.round()}m  •  5 sn\'de bir güncelleniyor'
                 '${_isProtected && _pair?.distanceRequest != null ? '  •  Talep: ${_pair!.distanceRequest!.round()}m bekleniyor' : ''}',
             style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
       ])),
@@ -1151,7 +1170,7 @@ class _FloatingDistanceCard extends StatelessWidget {
         const SizedBox(width: 4),
         Padding(padding: const EdgeInsets.only(bottom: 2), child: Text('m', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
       ]),
-      Text('Eşik: ${threshold?.round() ?? '—'}m', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+      Text('Uyarı: ${threshold != null ? (threshold! * 0.6).round() : '—'}m  •  Alarm: ${kAlarmDistanceMeters.round()}m', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
     ]),
   );
 }

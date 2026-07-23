@@ -15,6 +15,7 @@ class _ProximityHandler extends TaskHandler {
   double? _myLat, _myLon;
   String _deviceId = '';
   bool _alarming = false;
+  bool _cautioning = false;
   int _tick = 0;
   final _battery = Battery();
 
@@ -231,6 +232,7 @@ class _ProximityHandler extends TaskHandler {
       double? alarmDistance;
       String? alarmSoundId;
       bool anyAlarm = false;
+      bool anyCaution = false;
       double? minRatio;
       final zonesSeen = <ZoneData>[];
 
@@ -271,13 +273,22 @@ class _ProximityHandler extends TaskHandler {
           d = LocationService.calculateDistance(_myLat!, _myLon!, other.lat, other.lon);
         }
 
-        if (d != null && pair.threshold > 0) {
-          final ratio = d / pair.threshold;
+        if (d != null) {
+          // Tam kontrol seyreltme sıklığı, sabit alarm mesafesine olan
+          // yakınlığa göre belirlenir — eşik artık alarmın kendisini değil,
+          // erken uyarıyı belirlediği için seyreltme kararı da ona göre
+          // değil, gerçek tehlike sınırına (1000m) göre olmalı.
+          final ratio = d / kAlarmDistanceMeters;
           if (minRatio == null || ratio < minRatio) minRatio = ratio;
         }
 
-        final proximityAlarm = d != null && d < pair.threshold;
+        final proximityAlarm = d != null && d < kAlarmDistanceMeters;
         final isAlarm = proximityAlarm || breachedZone != null;
+        // Erken/titreşimli uyarı sadece uzaklaştırılan tarafta ve tam
+        // alarma girmeden önce, eşiğin %60'ına düşülünce tetiklenir.
+        if (role == 'tracked' && !isAlarm && d != null && pair.threshold > 0 && d < pair.threshold * 0.6) {
+          anyCaution = true;
+        }
 
         if (isAlarm) {
           anyAlarm = true;
@@ -302,12 +313,17 @@ class _ProximityHandler extends TaskHandler {
           _alarming = true;
           await NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
         }
+        _cautioning = false;
         FlutterForegroundTask.updateService(
           notificationTitle: alarmZone != null ? '⚠️ YASAK BÖLGE — ${alarmZone.label}' : '⚠️ YAKLAŞMA — ${alarmDistance?.round()}m',
           notificationText: 'Aktif alarm',
         );
       } else {
         if (_alarming) { _alarming = false; await NotificationService.stopAlarm(); }
+        if (anyCaution && !_cautioning) {
+          await NotificationService.showApproachWarning();
+        }
+        _cautioning = anyCaution;
         FlutterForegroundTask.updateService(
           notificationTitle: alarmDistance != null ? 'UZAKDUR — Güvenli (${alarmDistance.round()}m)' : 'UZAKDUR — İzleniyor',
           notificationText: 'İzleniyor',

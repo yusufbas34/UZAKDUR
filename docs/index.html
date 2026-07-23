@@ -425,7 +425,7 @@
     </div>
     <div id="detailMap"></div>
     <div class="row" style="margin-top:14px;">
-      <span style="color:var(--muted); font-size:12px;">Alarm eşiği:</span>
+      <span style="color:var(--muted); font-size:12px;">Uyarı sınırı (tam alarm her zaman 1000m'de çalar):</span>
       <input type="number" id="detailThreshold" min="10" max="5000" style="width:90px;"/>
       <span style="color:var(--muted); font-size:12px;">metre</span>
       <button onclick="saveDetailThreshold()">Kaydet</button>
@@ -639,7 +639,7 @@ async function requestLocationNow(deviceId) {
 }
 
 let devices = {}, pairs = {}, locations = {}, alarmLogAll = {};
-let detailMapObj = null, detailMarkers = [], detailCircle = null, detailZoneLayers = [], openPairId = null, detailMapFitted = false;
+let detailMapObj = null, detailMarkers = [], detailCircle = null, detailCautionCircle = null, detailZoneLayers = [], openPairId = null, detailMapFitted = false;
 let zonePickerMapObj = null, zonePickerMarker = null, zonePickerLatLng = null;
 let notifEnabled = false, lastSeenTs = Date.now(), firstRefresh = true, firstLoadChecked = false;
 let prevOnline = {};
@@ -737,10 +737,13 @@ function timeAgo(ts) {
   return Math.floor(s / 86400) + ' gün önce';
 }
 
-// Live severity for a pair, computed the same way the app itself alarms
-// (proximity threshold + zone breach), plus a short grace window after a
-// panic press so it doesn't disappear from "critical" the instant distance
-// happens to read safe.
+// Live severity for a pair, computed the same way the app itself alarms —
+// a fixed 1000m safety floor for the real alarm (ALARM_DISTANCE_M),
+// independent of the per-pair configurable threshold, which now only
+// marks the earlier caution/vibration boundary (60% of it) — plus a short
+// grace window after a panic press so it doesn't disappear from "critical"
+// the instant distance happens to read safe.
+const ALARM_DISTANCE_M = 1000;
 function pairStatus(pairId) {
   const p = pairs[pairId];
   const pLoc = locations[p.protectedDeviceId];
@@ -752,8 +755,8 @@ function pairStatus(pairId) {
   const recentPanic = events.some(e => e.type === 'panic' && Date.now() - e.ts < 5 * 60000);
 
   let status = 'unknown';
-  if (recentPanic || zone || (distance !== null && distance < p.threshold)) status = 'critical';
-  else if (distance !== null && distance < p.threshold * 1.5) status = 'warning';
+  if (recentPanic || zone || (distance !== null && distance < ALARM_DISTANCE_M)) status = 'critical';
+  else if (distance !== null && p.threshold > 0 && distance < p.threshold * 0.6) status = 'warning';
   else if (distance !== null) status = 'safe';
 
   return { status, distance, zone, lastEvent, pLoc, tLoc };
@@ -942,7 +945,7 @@ function renderOpsBoard(pairIds) {
     const pDev = devices[p.protectedDeviceId] || {};
     const tDev = devices[p.trackedDeviceId] || {};
     const distText = r.status === 'critical' && r.zone ? `🚫 ${escapeHtml(r.zone.label)}`
-      : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> / ${p.threshold}m eşik`
+      : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> — alarm ${ALARM_DISTANCE_M}m / uyarı ${Math.round(p.threshold * 0.6)}m`
       : 'Mesafe bilinmiyor';
     return `<div class="pair-card" onclick="openDetail('${r.pairId}')">
       <div class="pair-card-head">
@@ -1102,7 +1105,7 @@ function render() {
           </div>
         </div>
         <div class="row" style="margin-top:14px;">
-          <span style="color:var(--muted); font-size:12px;">Alarm eşiği:</span>
+          <span style="color:var(--muted); font-size:12px;">Uyarı sınırı:</span>
           <input type="number" id="th_${pid}" value="${p.threshold}" min="10" max="5000" style="width:90px;"/>
           <span style="color:var(--muted); font-size:12px;">metre</span>
           <button onclick="saveThreshold('${pid}')">Kaydet</button>
@@ -1593,6 +1596,7 @@ function updateDetailMap() {
   detailMarkers.forEach(m => detailMapObj.removeLayer(m));
   detailMarkers = [];
   if (detailCircle) { detailMapObj.removeLayer(detailCircle); detailCircle = null; }
+  if (detailCautionCircle) { detailMapObj.removeLayer(detailCautionCircle); detailCautionCircle = null; }
   detailZoneLayers.forEach(l => detailMapObj.removeLayer(l));
   detailZoneLayers = [];
 
@@ -1608,7 +1612,12 @@ function updateDetailMap() {
       .bindTooltip(`${n}-Korunan ${escapeHtml(pName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label protected' });
     detailMarkers.push(m);
     pts.push([pLoc.lat, pLoc.lon]);
-    detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold, color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.08, weight: 1 }).addTo(detailMapObj);
+    // Kırmızı çember: gerçek alarm sınırı, sabit 1000m (eşikten bağımsız).
+    // Turuncu çember: erken/titreşimli uyarının tetiklendiği sınır, eşiğin %60'ı.
+    detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: ALARM_DISTANCE_M, color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.08, weight: 1 }).addTo(detailMapObj);
+    if (p.threshold > 0) {
+      detailCautionCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.6, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.06, weight: 1, dashArray: '4,4' }).addTo(detailMapObj);
+    }
   }
   if (tLoc) {
     const m = L.circleMarker([tLoc.lat, tLoc.lon], { radius: 8, color: '#EF4444', fillColor: '#EF4444', fillOpacity: .9, weight: 2 })
@@ -1670,7 +1679,7 @@ async function exportPdf() {
   doc.setFontSize(16); doc.text('UZAKDUR — Alarm Geçmişi Raporu', 14, 18);
   doc.setFontSize(10); doc.text(`${pName} <-> ${tName}`, 14, 26);
   doc.text(`Oluşturulma: ${new Date().toLocaleString('tr-TR')}`, 14, 32);
-  doc.text(`Alarm eşiği: ${p.threshold}m`, 14, 38);
+  doc.text(`Alarm sınırı: ${ALARM_DISTANCE_M}m (sabit)  •  Uyarı sınırı: ${Math.round(p.threshold * 0.6)}m`, 14, 38);
   let y = 50;
   doc.setFontSize(9);
   doc.text('Tarih', 14, y); doc.text('Tür', 90, y); doc.text('Değer', 140, y);

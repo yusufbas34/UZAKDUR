@@ -51,6 +51,12 @@ class NotificationService {
           'uzakdur_admin_msg', 'UZAKDUR Admin Mesajı',
           description: 'Admin panelinden gönderilen mesajlar', importance: Importance.high,
         ));
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+          'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
+          description: 'Tam alarm eşiğinden önceki erken titreşimli uyarı', importance: Importance.high,
+        ));
     await _player.setReleaseMode(ReleaseMode.loop);
   }
 
@@ -79,6 +85,26 @@ class NotificationService {
         importance: Importance.high, priority: Priority.high,
       )),
     );
+  }
+
+  // Tam alarm (siren) sadece sabit 1000m güvenlik eşiğinin altında çalar;
+  // bundan önce, admin'in ayarladığı eşiğin %60'ına girildiğinde
+  // uzaklaştırılan tarafa erken, titreşimli bir uyarı gösterilir — böylece
+  // durum tam alarma dönüşmeden önce kişi kendiliğinden uzaklaşma şansı
+  // bulur.
+  static Future<void> showApproachWarning() async {
+    await _plugin.show(
+      106,
+      '⚠️ Yaklaşma Uyarısı',
+      'Koruma altındaki kişiye yaklaşmaktasınız. Lütfen ilgili birimlere haber verilmeden bulunduğunuz konumu değiştiriniz.',
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 250, 150, 250]);
+    }
   }
 
   static Future<void> showBatteryWarning(int level, {required bool critical}) async {
