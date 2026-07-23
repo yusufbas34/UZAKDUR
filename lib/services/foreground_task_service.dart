@@ -173,6 +173,15 @@ class _ProximityHandler extends TaskHandler {
   @override
   Future<void> onRepeatEvent(DateTime timestamp, SendPort? sendPort) async {
     if (_deviceId.isEmpty) return;
+    // "Çevrimiçi" durumu monitor_screen'in KENDİ 5sn'lik zamanlayıcısından da
+    // beslenebiliyor (uygulama ekranı açıkken) — bu da arka plan servisinin
+    // gerçekten çalıştığını KANITLAMIYOR, sadece ekranın açık olduğunu
+    // gösteriyor olabilir. Admin panelin ikisini ayırt edebilmesi için SADECE
+    // bu isolate'ten (yani servis gerçekten tick attığında) yazılan ayrı bir
+    // zaman damgası.
+    try {
+      await FirebaseDatabase.instance.ref('devices/$_deviceId/serviceTick').set(ServerValue.timestamp);
+    } catch (_) {}
     await LocationService.heartbeat(_deviceId);
     await _checkAdminMessage();
     await _checkLocationRequest();

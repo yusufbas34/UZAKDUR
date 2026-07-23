@@ -647,6 +647,22 @@ function isOnline(d) {
   return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
 }
 
+// "Çevrimiçi" durumu uygulama EKRANI açıkken de beslenebiliyor (kendi ayrı
+// zamanlayıcısı var) — bu, arka plan servisinin (mesaj/konum isteğini
+// işleyen kod) gerçekten çalıştığını KANITLAMAZ. serviceTick SADECE arka
+// plan servisinin kendi isolate'inden yazılıyor; bu yüzden ekran kapalıyken
+// de "servis gerçekten tick atıyor mu" sorusuna ayrı, güvenilir bir cevap.
+function serviceAlive(d) {
+  return d.serviceTick && (Date.now() - d.serviceTick) < 15000;
+}
+function serviceBadge(d) {
+  const alive = serviceAlive(d);
+  const color = alive ? 'var(--safe)' : 'var(--danger)';
+  const label = alive ? 'Servis çalışıyor' : 'Servis DURMUŞ';
+  const title = alive ? '' : 'title="Arka plan servisi tick atmıyor — telefon OS\'u öldürmüş olabilir (pil kısıtlaması ayarlanmamış)."';
+  return `<span style="color:${color}; font-weight:700;" ${title}>⚙ ${label}</span>`;
+}
+
 const MAX_PARTNERS = 4;
 
 // Bir cihazın hangi eşleşmelerde yer aldığını doğrudan pairs koleksiyonundan
@@ -894,6 +910,7 @@ function deviceActionRow(icon, roleLabel, dev, devId, loc) {
         <div class="device-meta">
           <span class="${battClass}">🔋 ${batt !== null ? batt + '%' : '—'}</span>
           <span>${loc?.ts ? '📍 ' + escapeHtml(timeAgo(loc.ts)) : '📍 konum yok'}</span>
+          ${serviceBadge(dev)}
         </div>
       </div>
       <div class="device-actions">
@@ -1032,6 +1049,7 @@ function render() {
           <span class="${battClass}">${battText}</span>
           <span>📍 ${escapeHtml(lastLoc)}</span>
           <span>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : 'Eşleşmedi'}</span>
+          ${serviceBadge(d)}
         </div>
         <div class="device-actions">
           <a href="javascript:void(0)" class="action-btn" onclick="openMsgModal('${id}','${nameSafe}')">💬 Mesaj Gönder${ackDot(id, 'adminMsg')}</a>
