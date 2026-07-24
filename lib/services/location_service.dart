@@ -5,11 +5,13 @@ import 'package:crypto/crypto.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
 
-// Tam alarm (siren) her eşleşmede sabit — bir eşleşmenin admin'in
-// ayarladığı "eşik"i ne olursa olsun, siren en geç bu mesafede çalar. Eşik
-// artık sadece erken/titreşimli uyarının (caution) sınırını belirler
-// (eşiğin %60'ı), alarmın kendisini değil.
-const kAlarmDistanceMeters = 1000.0;
+// Üç kademeli yaklaşma sistemi — pair.threshold'a (admin/telefon tarafından
+// ayarlanan "sınır") oranla: mesafe sınırın %50'sinin altındaysa ACİL (tam
+// alarm/siren), %50-%80 arasıysa KRİTİK, %80-%100 arasıysa SINIR (yeni
+// girildi, en hafif uyarı). Sabit bir mesafe (ör. 1000m) yok — tamamen
+// eşiğe oranla belirleniyor.
+const kAcilRatio = 0.5;
+const kKritikRatio = 0.8;
 
 class DeviceAccount {
   final String deviceId;

@@ -96,16 +96,16 @@ class NotificationService {
     );
   }
 
-  // Tam alarm (siren) sadece sabit 1000m güvenlik eşiğinin altında çalar;
-  // bundan önce, admin'in ayarladığı eşiğin %60'ına girildiğinde
-  // uzaklaştırılan tarafa erken, titreşimli bir uyarı gösterilir — böylece
-  // durum tam alarma dönüşmeden önce kişi kendiliğinden uzaklaşma şansı
-  // bulur.
+  // Üç kademeli yaklaşma sistemi: mesafe sınırın (pair.threshold) %50'sinin
+  // altına inince tam alarm (siren, startAlarm) çalar; %50-%80 arası KRİTİK
+  // (bu metod — daha güçlü uyarı); %80-%100 arası SINIR (aşağıdaki
+  // showBoundaryEnteredNotice — en hafif, ilk uyarı). Uzaklaştırılan taraf
+  // için, tam alarma dönüşmeden önce kademeli olarak uzaklaşma şansı verir.
   static Future<void> showApproachWarning() async {
     await _plugin.show(
       106,
-      '⚠️ Yaklaşma Uyarısı',
-      'Koruma altındaki kişiye yaklaşmaktasınız. Lütfen ilgili birimlere haber verilmeden bulunduğunuz konumu değiştiriniz.',
+      '⚠️ KRİTİK — Yaklaşma Uyarısı',
+      'Koruma altındaki kişiye hızla yaklaşmaktasınız. Lütfen ilgili birimlere haber verilmeden bulunduğunuz konumu değiştiriniz.',
       const NotificationDetails(android: AndroidNotificationDetails(
         'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
         importance: Importance.high, priority: Priority.high,
@@ -113,6 +113,22 @@ class NotificationService {
     );
     if (await Vibration.hasVibrator() ?? false) {
       Vibration.vibrate(pattern: [0, 250, 150, 250]);
+    }
+  }
+
+  // En hafif/ilk kademe — sınırın (eşiğin) içine yeni girildiğinde.
+  static Future<void> showBoundaryEnteredNotice() async {
+    await _plugin.show(
+      108,
+      '🔶 Sınır İçine Girildi',
+      'Koruma altındaki kişiye yaklaşıyorsunuz. Mesafenizi kontrol edin.',
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 150]);
     }
   }
 

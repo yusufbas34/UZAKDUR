@@ -17,7 +17,7 @@ class _ProximityHandler extends TaskHandler {
   double? _myLat, _myLon;
   String _deviceId = '';
   bool _alarming = false;
-  bool _cautioning = false;
+  String _lastTier = 'safe'; // 'safe' | 'sinir' | 'kritik' — bir önceki tam kontroldeki en kötü kademe (acil hariç)
   bool _startErrorCleared = false;
   int _tick = 0;
   final _battery = Battery();
@@ -266,7 +266,10 @@ class _ProximityHandler extends TaskHandler {
       double? alarmDistance;
       String? alarmSoundId;
       bool anyAlarm = false;
-      bool anyCaution = false;
+      // Üç kademeli sistem: sınırın (pair.threshold) %50'sinin altı ACİL (tam
+      // alarm), %50-%80 arası KRİTİK, %80-%100 arası SINIR (yeni girildi).
+      // Birden fazla eşleşme varsa en kötü (en yakın) kademe esas alınır.
+      String worstTier = 'safe';
       double? minRatio;
       final zonesSeen = <ZoneData>[];
 
@@ -307,22 +310,24 @@ class _ProximityHandler extends TaskHandler {
           d = LocationService.calculateDistance(_myLat!, _myLon!, other.lat, other.lon);
         }
 
-        if (d != null) {
-          // Tam kontrol seyreltme sıklığı, sabit alarm mesafesine olan
-          // yakınlığa göre belirlenir — eşik artık alarmın kendisini değil,
-          // erken uyarıyı belirlediği için seyreltme kararı da ona göre
-          // değil, gerçek tehlike sınırına (1000m) göre olmalı.
-          final ratio = d / kAlarmDistanceMeters;
+        bool proximityAlarm = false;
+        String tier = 'safe'; // 'safe' | 'sinir' | 'kritik'
+        if (d != null && pair.threshold > 0) {
+          // Tam kontrol seyreltme sıklığı sınıra (pair.threshold) olan
+          // yakınlığa göre belirlenir — sabit bir mesafe yok, tamamen orana
+          // dayalı.
+          final ratio = d / pair.threshold;
           if (minRatio == null || ratio < minRatio) minRatio = ratio;
+          proximityAlarm = ratio <= kAcilRatio;
+          if (!proximityAlarm) {
+            if (ratio <= kKritikRatio) tier = 'kritik';
+            else if (ratio <= 1.0) tier = 'sinir';
+          }
         }
+        if (tier == 'kritik' && worstTier != 'kritik') worstTier = 'kritik';
+        if (tier == 'sinir' && worstTier == 'safe') worstTier = 'sinir';
 
-        final proximityAlarm = d != null && d < kAlarmDistanceMeters;
         final isAlarm = proximityAlarm || breachedZone != null;
-        // Erken/titreşimli uyarı sadece uzaklaştırılan tarafta ve tam
-        // alarma girmeden önce, eşiğin %60'ına düşülünce tetiklenir.
-        if (role == 'tracked' && !isAlarm && d != null && pair.threshold > 0 && d < pair.threshold * 0.6) {
-          anyCaution = true;
-        }
 
         if (isAlarm) {
           anyAlarm = true;
@@ -347,17 +352,24 @@ class _ProximityHandler extends TaskHandler {
           _alarming = true;
           await NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
         }
-        _cautioning = false;
+        _lastTier = 'safe';
         FlutterForegroundTask.updateService(
           notificationTitle: alarmZone != null ? '⚠️ YASAK BÖLGE — ${alarmZone.label}' : '⚠️ YAKLAŞMA — ${alarmDistance?.round()}m',
           notificationText: 'Aktif alarm',
         );
       } else {
         if (_alarming) { _alarming = false; await NotificationService.stopAlarm(); }
-        if (anyCaution && !_cautioning) {
-          await NotificationService.showApproachWarning();
+        // Sadece kademe KÖTÜLEŞTİĞİNDE bildirim/titreşim tetiklenir, aynı
+        // kademede kalırken her tam kontrolde tekrar bildirim gösterilmez.
+        // Bu erken uyarılar sadece uzaklaştırılan tarafa gösterilir.
+        if (role == 'tracked' && worstTier != _lastTier && worstTier != 'safe') {
+          if (worstTier == 'kritik') {
+            await NotificationService.showApproachWarning();
+          } else {
+            await NotificationService.showBoundaryEnteredNotice();
+          }
         }
-        _cautioning = anyCaution;
+        _lastTier = worstTier;
         FlutterForegroundTask.updateService(
           notificationTitle: alarmDistance != null ? 'UZAKDUR — Güvenli (${alarmDistance.round()}m)' : 'UZAKDUR — İzleniyor',
           notificationText: 'İzleniyor',

@@ -49,7 +49,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   // uzaklaştırılan farklı korunan kişilerle eşleşebildiği için her eşleşme
   // kendi protectedDeviceId'sinden bölgelerini ayrıca dinler.
   Map<String, List<ZoneData>> _zonesByPair = {};
-  Map<String, String> _pairStatus = {}; // pairId -> 'alarm' | 'caution' | 'safe' | 'unknown'
+  Map<String, String> _pairStatus = {}; // pairId -> 'acil' | 'kritik' | 'sinir' | 'safe' | 'unknown'
   final Map<String, StreamSubscription> _otherLocSubs = {};
   final Map<String, StreamSubscription> _otherOnlineSubs = {};
   final Map<String, StreamSubscription> _otherNameSubs = {};
@@ -71,7 +71,8 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   LocationData? _myLocation;
   double? _distance;
-  bool _isAlarm = false, _isRunning = false, _wasCaution = false;
+  bool _isAlarm = false, _isRunning = false;
+  String _lastTier = 'safe'; // 'safe' | 'sinir' | 'kritik' — bir önceki tick'teki en kötü kademe (acil hariç)
   String _statusText = 'GPS bekleniyor…';
   String? _alarmZoneLabel;
   String? _errorText;
@@ -379,7 +380,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         _alarmCtrl.stop(); _alarmCtrl.reset();
         NotificationService.stopAlarm();
       }
-      _wasCaution = false;
+      _lastTier = 'safe';
       if (!mounted) return;
       setState(() {
         _isAlarm = false;
@@ -394,7 +395,10 @@ class _MonitorScreenState extends State<MonitorScreen>
     ZoneData? alarmZone;
     double? alarmDistance;
     String? alarmSoundId;
-    bool anyCaution = false;
+    // Üç kademeli sistem: sınırın (pair.threshold) %50'sinin altı ACİL (tam
+    // alarm), %50-%80 arası KRİTİK, %80-%100 arası SINIR (yeni girildi).
+    // Birden fazla eşleşme varsa en kötü (en yakın) kademe esas alınır.
+    String worstTier = 'safe';
     final newStatus = <String, String>{};
 
     for (final entry in _pairs.entries) {
@@ -412,20 +416,21 @@ class _MonitorScreenState extends State<MonitorScreen>
 
       double? d;
       bool proximityAlarm = false;
-      bool caution = false;
-      if (_myLocation != null && otherLoc != null) {
+      String tier = 'safe'; // 'safe' | 'sinir' | 'kritik'
+      if (_myLocation != null && otherLoc != null && pair.threshold > 0) {
         d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, otherLoc.lat, otherLoc.lon);
-        // Tam alarm artık eşikten bağımsız, sabit 1000m güvenlik tabanı —
-        // admin ne kadar büyük bir eşik ayarlarsa ayarlasın siren en geç
-        // 1000m'de çalar. Eşik değeri bunun yerine erken/titreşimli uyarının
-        // (caution) sınırını belirler: eşiğin %60'ı.
-        proximityAlarm = d < kAlarmDistanceMeters;
-        caution = !proximityAlarm && pair.threshold > 0 && d < pair.threshold * 0.6;
+        final ratio = d / pair.threshold;
+        proximityAlarm = ratio <= kAcilRatio;
+        if (!proximityAlarm) {
+          if (ratio <= kKritikRatio) tier = 'kritik';
+          else if (ratio <= 1.0) tier = 'sinir';
+        }
       }
-      if (caution) anyCaution = true;
+      if (tier == 'kritik' && worstTier != 'kritik') worstTier = 'kritik';
+      if (tier == 'sinir' && worstTier == 'safe') worstTier = 'sinir';
 
       final isAlarm = proximityAlarm || zone != null;
-      newStatus[pid] = isAlarm ? 'alarm' : (caution ? 'caution' : (d != null ? 'safe' : 'unknown'));
+      newStatus[pid] = isAlarm ? 'acil' : (tier != 'safe' ? tier : (d != null ? 'safe' : 'unknown'));
 
       if (isAlarm) {
         if (zone != null) {
@@ -463,9 +468,11 @@ class _MonitorScreenState extends State<MonitorScreen>
       _alarmZoneLabel = isAlarm ? alarmZone?.label : null;
       _statusText = isAlarm
           ? (alarmZone != null ? 'Yasak bölgede: ${alarmZone.label}' : 'Yaklaşma tespit edildi!')
-          : anyCaution
-              ? 'Dikkat — Sınıra yaklaşıyor'
-              : 'Güvenli mesafede';
+          : worstTier == 'kritik'
+              ? 'Kritik — Hızla yaklaşıyor'
+              : worstTier == 'sinir'
+                  ? 'Sınır içine girildi'
+                  : 'Güvenli mesafede';
       if (_distance != null && (_log.isEmpty || _log.first.isAlarm != isAlarm)) {
         _log.insert(0, LogEntry(now, _distance!, isAlarm));
         if (_log.length > 100) _log.removeLast();
@@ -475,18 +482,28 @@ class _MonitorScreenState extends State<MonitorScreen>
     if (isAlarm) {
       if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
       NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
-      _wasCaution = false;
+      _lastTier = 'safe';
     } else {
       _alarmCtrl.stop(); _alarmCtrl.reset();
       NotificationService.stopAlarm();
-      if (anyCaution && !_wasCaution) {
+      // Sadece kademe KÖTÜLEŞTİĞİNDE (daha önce görülenden daha ciddi bir
+      // kademeye yeni girildiğinde) bildirim/titreşim tetiklenir — aksi
+      // halde aynı kademede kalınırken her 5sn'de bir tekrar bildirim
+      // gösterilirdi.
+      if (worstTier != _lastTier && worstTier != 'safe') {
         HapticFeedback.mediumImpact();
-        // Bu erken uyarı sadece uzaklaştırılan tarafa gösterilir — metni
+        // Bu erken uyarılar sadece uzaklaştırılan tarafa gösterilir — metni
         // ("...yaklaşmaktasınız...") doğrudan ona hitap ediyor, korunan
         // tarafta anlamsız olurdu.
-        if (!_isProtected) NotificationService.showApproachWarning();
+        if (!_isProtected) {
+          if (worstTier == 'kritik') {
+            NotificationService.showApproachWarning();
+          } else {
+            NotificationService.showBoundaryEnteredNotice();
+          }
+        }
       }
-      _wasCaution = anyCaution;
+      _lastTier = worstTier;
     }
     _updateMap();
   }
@@ -540,7 +557,9 @@ class _MonitorScreenState extends State<MonitorScreen>
     final markers = <Marker>{};
     final circles = <Circle>{};
     final polylines = <Polyline>{};
-    final cautionRadius = (_pair?.threshold ?? 0) * 0.6;
+    final threshold = _pair?.threshold ?? 0;
+    final acilRadius = threshold * kAcilRatio;
+    final kritikRadius = threshold * kKritikRatio;
 
     if (_myLocation != null) {
       final pos = LatLng(_myLocation!.lat, _myLocation!.lon);
@@ -549,19 +568,26 @@ class _MonitorScreenState extends State<MonitorScreen>
         icon: BitmapDescriptor.defaultMarkerWithHue(_isProtected ? BitmapDescriptor.hueAzure : BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(title: '${widget.name} (Ben)'), zIndex: 2,
       ));
-      // Kırmızı çember: gerçek alarm sınırı, sabit (eşikten bağımsız).
-      // Turuncu çember: erken/titreşimli uyarının tetiklendiği sınır.
-      circles.add(Circle(
-        circleId: const CircleId('threshold'), center: pos, radius: kAlarmDistanceMeters,
-        fillColor: (_isAlarm ? AppColors.danger : AppColors.safe).withOpacity(0.08),
-        strokeColor: (_isAlarm ? AppColors.danger : AppColors.safe).withOpacity(0.4),
-        strokeWidth: 1,
-      ));
-      if (cautionRadius > 0) {
+      // Kırmızı çember: ACİL (tam alarm, eşiğin %50'si). Turuncu: KRİTİK
+      // (eşiğin %80'i). Mavi: SINIR (eşiğin tamamı) — üç kademe de sınıra
+      // (pair.threshold) oranlı, sabit bir mesafe yok.
+      if (threshold > 0) {
         circles.add(Circle(
-          circleId: const CircleId('caution'), center: pos, radius: cautionRadius,
+          circleId: const CircleId('acil'), center: pos, radius: acilRadius,
+          fillColor: AppColors.danger.withOpacity(0.08),
+          strokeColor: AppColors.danger.withOpacity(0.4),
+          strokeWidth: 1,
+        ));
+        circles.add(Circle(
+          circleId: const CircleId('kritik'), center: pos, radius: kritikRadius,
           fillColor: AppColors.warning.withOpacity(0.06),
           strokeColor: AppColors.warning.withOpacity(0.35),
+          strokeWidth: 1,
+        ));
+        circles.add(Circle(
+          circleId: const CircleId('sinir'), center: pos, radius: threshold,
+          fillColor: AppColors.roleB.withOpacity(0.04),
+          strokeColor: AppColors.roleB.withOpacity(0.3),
           strokeWidth: 1,
         ));
       }
@@ -690,7 +716,7 @@ class _MonitorScreenState extends State<MonitorScreen>
               })),
           const SizedBox(height: 4),
           Text('Kaydırıcı 20-5000m arası; daha büyük bir değeri kutuya elle yazabilirsin. '
-              'Bu eşik, erken/titreşimli uyarının sınırıdır (%60\'ı) — tam alarm her zaman ${kAlarmDistanceMeters.round()}m\'de çalar.',
+              'Bu sınırın %50\'sinde acil alarm, %80\'inde kritik uyarı, tamamında sınır bildirimi çalar.',
               style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled)),
           const SizedBox(height: 16),
           SizedBox(width: double.infinity, child: GestureDetector(
@@ -874,12 +900,20 @@ class _MonitorScreenState extends State<MonitorScreen>
   }
 
   Color get _roleColor => _isProtected ? AppColors.roleB : AppColors.roleA;
-  Color get _statusColor => _isAlarm ? AppColors.danger : _distance != null && _pair != null && _pair!.threshold > 0 && _distance! < _pair!.threshold * 0.6 ? AppColors.warning : AppColors.safe;
+  Color get _statusColor {
+    if (_isAlarm) return AppColors.danger;
+    if (_distance == null || _pair == null || _pair!.threshold <= 0) return AppColors.safe;
+    final ratio = _distance! / _pair!.threshold;
+    if (ratio <= kKritikRatio) return AppColors.warning;
+    if (ratio <= 1.0) return AppColors.roleB;
+    return AppColors.safe;
+  }
 
   Color _statusColorFor(String? status) {
     switch (status) {
-      case 'alarm': return AppColors.danger;
-      case 'caution': return AppColors.warning;
+      case 'acil': return AppColors.danger;
+      case 'kritik': return AppColors.warning;
+      case 'sinir': return AppColors.roleB;
       case 'safe': return AppColors.safe;
       default: return AppColors.textDisabled;
     }
@@ -1299,7 +1333,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(_statusText, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: _isAlarm ? AppColors.danger : AppColors.textPrimary)),
-        Text('Uyarı sınırı: ${_pair?.threshold.round() ?? '—'}m  •  Alarm: ${kAlarmDistanceMeters.round()}m  •  5 sn\'de bir güncelleniyor'
+        Text('Sınır: ${_pair?.threshold.round() ?? '—'}m  •  Acil: ${_pair != null ? (_pair!.threshold * kAcilRatio).round() : '—'}m  •  5 sn\'de bir güncelleniyor'
                 '${_isProtected && _pair?.distanceRequest != null ? '  •  Talep: ${_pair!.distanceRequest!.round()}m bekleniyor' : ''}',
             style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
       ])),
@@ -1460,7 +1494,7 @@ class _FloatingDistanceCard extends StatelessWidget {
         const SizedBox(width: 4),
         Padding(padding: const EdgeInsets.only(bottom: 2), child: Text('m', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
       ]),
-      Text('Uyarı: ${threshold != null ? (threshold! * 0.6).round() : '—'}m  •  Alarm: ${kAlarmDistanceMeters.round()}m', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+      Text('Kritik: ${threshold != null ? (threshold! * kKritikRatio).round() : '—'}m  •  Acil: ${threshold != null ? (threshold! * kAcilRatio).round() : '—'}m', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
     ]),
   );
 }
