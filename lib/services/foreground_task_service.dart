@@ -18,6 +18,7 @@ class _ProximityHandler extends TaskHandler {
   String _deviceId = '';
   bool _alarming = false;
   bool _cautioning = false;
+  bool _startErrorCleared = false;
   int _tick = 0;
   final _battery = Battery();
 
@@ -225,6 +226,13 @@ class _ProximityHandler extends TaskHandler {
     // zaman damgası.
     try {
       await FirebaseDatabase.instance.ref('devices/$_deviceId/serviceTick').set(ServerValue.timestamp);
+      // Buraya kadar geldiysek servis gerçekten tıklıyor demektir — daha
+      // önce yazılmış olabilecek eski bir serviceStartError artık geçersiz,
+      // admin panelde asılı kalmasın diye bir kereliğine temizleniyor.
+      if (!_startErrorCleared) {
+        _startErrorCleared = true;
+        FirebaseDatabase.instance.ref('devices/$_deviceId/serviceStartError').remove().ignore();
+      }
     } catch (_) {}
     await LocationService.heartbeat(_deviceId);
     await _checkAdminMessage();
