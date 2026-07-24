@@ -24,9 +24,18 @@ class NotificationService {
     // değil. Bu istenmeden alarm/pil/mesaj bildirimleri sessizce hiç
     // gösterilmez (alarmın sesi/titreşimi bu izne bağlı değil, o yüzden
     // "alarm çalışıyor ama bildirim hiç gelmiyor" hissi verir).
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    //
+    // Bu çağrı bir Activity'ye ihtiyaç duyuyor — arka plan servisinin kendi
+    // isolate'inde (ekran/Activity yok) çağrıldığında eklenti null Context
+    // üzerinden checkPermission çağırmaya çalışıp PlatformException
+    // fırlatıyordu. İzin isteme zaten sadece ön planda (main.dart'ın ilk
+    // çağrısında) anlamlı, o yüzden burada sessizce yutuluyor — kanal
+    // oluşturma (aşağıda) buna bağımlı değil, o her isolate'te çalışmalı.
+    try {
+      await _plugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    } catch (_) {}
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(const AndroidNotificationChannel(
