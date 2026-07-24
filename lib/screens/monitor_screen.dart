@@ -84,6 +84,9 @@ class _MonitorScreenState extends State<MonitorScreen>
   bool? _adminProtectionActive;
   bool? _batteryOptOn; // true: OS hâlâ pil kısıtlaması uyguluyor (kötü)
   int _bottomTab = 0;
+  // null: izinler henüz kontrol edilmedi (kısa bir yükleniyor ekranı
+  // gösterilir). true: kurulum kontrolü tam ekran gösteriliyor.
+  bool? _showGate;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
   final _battery = Battery();
@@ -122,14 +125,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     _alarmAnim = CurvedAnimation(parent: _alarmCtrl, curve: Curves.easeInOut);
     WidgetsBinding.instance.addObserver(this);
     ForegroundTaskService.init();
-    _checkNotifPermission();
-    _checkBatteryOpt();
+    _initHealthGate();
     _start();
-    if (!_isProtected) {
-      // Silme koruması sadece uzaklaştırılan tarafta anlamlı — korunan
-      // tarafın uygulamayı silmesini engellemenin bir güvenlik amacı yok.
-      _checkDeviceAdmin();
-    }
     if (_isProtected) {
       _loadDisguiseState();
       // Ses tuşuna arka arkaya 3 kez basmak da (uygulama ön plandayken)
@@ -165,6 +162,50 @@ class _MonitorScreenState extends State<MonitorScreen>
     final status = await Permission.ignoreBatteryOptimizations.status;
     if (!mounted) return;
     setState(() => _batteryOptOn = !status.isGranted);
+  }
+
+  // Dağınık banner'lar kullanıcının bir tanesini atlayıp fark etmeden
+  // devam etmesine izin veriyordu — bu oturumdaki neredeyse tüm sorunların
+  // kökü buydu. İlk kurulumda (ya da hâlâ çözülmemiş bir sorun varsa) tüm
+  // izinleri tek bir tam ekran kontrolde, sırayla, ✓/✗ ile gösterip devam
+  // etmeden önce görülmesini zorunlu kılıyoruz.
+  Future<void> _initHealthGate() async {
+    final checks = <Future>[_checkNotifPermission(), _checkBatteryOpt()];
+    if (!_isProtected) checks.add(_checkDeviceAdmin());
+    await Future.wait(checks);
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final done = prefs.getBool('setup_gate_done') ?? false;
+    setState(() => _showGate = !done || _permIssueCount > 0);
+  }
+
+  Future<void> _dismissGate() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('setup_gate_done', true);
+    if (!mounted) return;
+    setState(() => _showGate = false);
+  }
+
+  Future<void> _onGateContinueTap() async {
+    if (_permIssueCount > 0) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Emin misin?', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          content: Text(
+            'Bu izinler açık olmadan mesaj, alarm ya da konum takibi güvenilir çalışmayabilir. Yine de devam etmek istiyor musun?',
+            style: GoogleFonts.inter(color: AppColors.textSecondary, height: 1.4),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Geri Dön', style: GoogleFonts.inter(color: AppColors.textMuted))),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Yine de Devam Et', style: GoogleFonts.inter(color: AppColors.danger, fontWeight: FontWeight.w700))),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await _dismissGate();
   }
 
   Future<void> _loadDisguiseState() async {
@@ -854,24 +895,70 @@ class _MonitorScreenState extends State<MonitorScreen>
     return WithForegroundTask(
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: SystemUiOverlayStyle.light,
-        child: Scaffold(
-          backgroundColor: AppColors.bg,
-          body: AnimatedBuilder(
-            animation: _alarmAnim,
-            builder: (_, child) => ColoredBox(
-              color: _isAlarm ? Color.lerp(AppColors.bg, AppColors.dangerDeep, _alarmAnim.value)! : AppColors.bg,
-              child: child,
-            ),
-            child: SafeArea(child: Column(children: [
-              _buildTopBar(),
-              Expanded(child: _bottomTab == 0 ? _buildMapTab() : _buildPermissionsTab()),
-            ])),
-          ),
-          bottomNavigationBar: _buildBottomNav(),
-        ),
+        child: _showGate == null
+            ? const Scaffold(backgroundColor: AppColors.bg, body: Center(child: CircularProgressIndicator(color: AppColors.danger)))
+            : _showGate == true
+                ? _buildHealthGate()
+                : Scaffold(
+                    backgroundColor: AppColors.bg,
+                    body: AnimatedBuilder(
+                      animation: _alarmAnim,
+                      builder: (_, child) => ColoredBox(
+                        color: _isAlarm ? Color.lerp(AppColors.bg, AppColors.dangerDeep, _alarmAnim.value)! : AppColors.bg,
+                        child: child,
+                      ),
+                      child: SafeArea(child: Column(children: [
+                        _buildTopBar(),
+                        Expanded(child: _bottomTab == 0 ? _buildMapTab() : _buildPermissionsTab()),
+                      ])),
+                    ),
+                    bottomNavigationBar: _buildBottomNav(),
+                  ),
       ),
     );
   }
+
+  Widget _buildHealthGate() => Scaffold(
+    backgroundColor: AppColors.bg,
+    body: SafeArea(child: Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.shield_rounded, color: _roleColor, size: 36),
+          const SizedBox(height: 12),
+          Text('Kurulum Kontrolü', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          const SizedBox(height: 6),
+          Text(
+            'UZAKDUR\'un güvenilir çalışması için aşağıdaki izinlerin açık olması gerekiyor. Devam etmeden önce hepsine göz at.',
+            style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted, height: 1.4),
+          ),
+        ]),
+      ),
+      Expanded(child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        children: _permissionCards(),
+      )),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: SizedBox(width: double.infinity, child: GestureDetector(
+          onTap: _onGateContinueTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color: _permIssueCount > 0 ? AppColors.surface : _roleColor,
+              borderRadius: BorderRadius.circular(14),
+              border: _permIssueCount > 0 ? Border.all(color: AppColors.border) : null,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              _permIssueCount > 0 ? 'Devam Et ($_permIssueCount eksik izin var)' : 'Devam Et',
+              style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: _permIssueCount > 0 ? AppColors.textMuted : Colors.white),
+            ),
+          ),
+        )),
+      ),
+    ])),
+  );
 
   Widget _buildMapTab() => Column(children: [
     if (_notifDenied) _buildNotifBanner(),
@@ -910,44 +997,50 @@ class _MonitorScreenState extends State<MonitorScreen>
       const SizedBox(height: 4),
       Text('Uygulamanın düzgün çalışması için gereken her şey tek yerde.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
       const SizedBox(height: 20),
-      _permissionCard(
-        icon: Icons.notifications_rounded,
-        title: 'Bildirimler',
-        desc: 'Kapalıysa mesaj, pil ve alarm bildirimlerini hiç görmezsin.',
-        ok: !_notifDenied,
-        loading: false,
-        onTap: () => openAppSettings(),
-      ),
-      const SizedBox(height: 12),
-      _permissionCard(
-        icon: Icons.battery_charging_full_rounded,
-        title: 'Pil Kısıtlaması',
-        desc: 'Kapalı olmazsa telefon, uygulamayı arka planda öldürüp takibi durdurabilir.',
-        ok: _batteryOptOn == null ? null : !_batteryOptOn!,
-        loading: _batteryOptOn == null,
-        onTap: () async {
-          await Permission.ignoreBatteryOptimizations.request();
-          await _checkBatteryOpt();
-        },
-      ),
-      if (!_isProtected) ...[
-        const SizedBox(height: 12),
-        _permissionCard(
-          icon: Icons.security_rounded,
-          title: 'Silme Koruması',
-          desc: 'Açık olursa uygulama silinmeye çalışıldığında yöneticiye anında haber verilir.',
-          ok: _adminProtectionActive,
-          loading: _adminProtectionActive == null,
-          onTap: () async {
-            await DeviceAdminService.requestActivation();
-            await _checkDeviceAdmin();
-          },
-        ),
-      ],
-      const SizedBox(height: 12),
-      _oemInfoCard(),
+      ..._permissionCards(),
     ],
   );
+
+  // Hem pasif "İzinler" sekmesi hem de ilk açılış sihirbazı (bkz.
+  // _buildHealthGate) aynı kart listesini kullanır — tek yerden güncellenir.
+  List<Widget> _permissionCards() => [
+    _permissionCard(
+      icon: Icons.notifications_rounded,
+      title: 'Bildirimler',
+      desc: 'Kapalıysa mesaj, pil ve alarm bildirimlerini hiç görmezsin.',
+      ok: !_notifDenied,
+      loading: false,
+      onTap: () => openAppSettings(),
+    ),
+    const SizedBox(height: 12),
+    _permissionCard(
+      icon: Icons.battery_charging_full_rounded,
+      title: 'Pil Kısıtlaması',
+      desc: 'Kapalı olmazsa telefon, uygulamayı arka planda öldürüp takibi durdurabilir.',
+      ok: _batteryOptOn == null ? null : !_batteryOptOn!,
+      loading: _batteryOptOn == null,
+      onTap: () async {
+        await Permission.ignoreBatteryOptimizations.request();
+        await _checkBatteryOpt();
+      },
+    ),
+    if (!_isProtected) ...[
+      const SizedBox(height: 12),
+      _permissionCard(
+        icon: Icons.security_rounded,
+        title: 'Silme Koruması',
+        desc: 'Açık olursa uygulama silinmeye çalışıldığında yöneticiye anında haber verilir.',
+        ok: _adminProtectionActive,
+        loading: _adminProtectionActive == null,
+        onTap: () async {
+          await DeviceAdminService.requestActivation();
+          await _checkDeviceAdmin();
+        },
+      ),
+    ],
+    const SizedBox(height: 12),
+    _oemInfoCard(),
+  ];
 
   Widget _permissionCard({
     required IconData icon,
