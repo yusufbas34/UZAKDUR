@@ -133,31 +133,81 @@ class NotificationService {
   }
 
   // Korunan kişinin düzenli kullandığı bir güzergaha (rota bölgesi)
-  // yaklaşıldığında — sadece kritik/sınır kademesi, asla tam alarm değil
-  // (konum zaten açık olduğu için gerçek bir yaklaşma normal eşik sistemini
-  // zaten tetikler; bu sadece isimli güzergaha özel erken bir uyarı).
-  static Future<void> showRouteProximityNotice(String routeLabel, {required bool critical}) async {
+  // yaklaşılıyor ama henüz içine girilmedi — tek seferlik uyarı, kademe
+  // kötüleşmedikçe tekrar etmez. Her iki taraf da bilgilendirilir: uzaklaştırılana
+  // kendi konumu, korunana ise uzaklaştırılanın kendi güzergahına yaklaştığı
+  // söylenir.
+  static Future<void> showRouteApproachNotice(String routeLabel, {required bool isProtectedSide}) async {
+    final title = isProtectedSide ? '🟠 Uzaklaştırılan Yaklaşıyor' : '⚠️ Güzergaha Hızla Yaklaşılıyor';
+    final body = isProtectedSide
+        ? 'Uzaklaştırılan kişi "$routeLabel" güzergahınıza yaklaşıyor.'
+        : '"$routeLabel" güzergahına hızla yaklaşıyorsunuz.';
     await _plugin.show(
       109,
-      critical ? '⚠️ Güzergaha Hızla Yaklaşılıyor' : '🔶 Güzergaha Yaklaşılıyor',
-      '"$routeLabel" güzergahına yaklaşıyorsunuz.',
+      title,
+      body,
       const NotificationDetails(android: AndroidNotificationDetails(
         'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
         importance: Importance.high, priority: Priority.high,
       )),
     );
     if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(pattern: critical ? [0, 250, 150, 250] : [0, 150]);
+      Vibration.vibrate(pattern: [0, 250, 150, 250]);
     }
   }
 
-  static Future<void> showBatteryWarning(int level, {required bool critical}) async {
+  // Güzergahın (koridorun) içine girildi — en ciddi rota kademesi, asla tam
+  // alarm değil ama girişte bir kez ve içeride kalındığı sürece 30sn'de bir
+  // tekrarlanır (bkz. monitor_screen.dart / foreground_task_service.dart).
+  static Future<void> showRouteInsideNotice(String routeLabel, {required bool isProtectedSide}) async {
+    final title = isProtectedSide ? '🔵 Uzaklaştırılan Güzergahınızda' : '🔴 Korumalı Güzergah İçindesiniz';
+    final body = isProtectedSide
+        ? 'Uzaklaştırılan kişi "$routeLabel" güzergahınızın içinde.'
+        : '"$routeLabel" korumalı güzergahı içindesiniz. Lütfen güzergahınızı değiştirin.';
+    await _plugin.show(
+      110,
+      title,
+      body,
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 150]);
+    }
+  }
+
+  // Yasak bölgeye (daire) girildiğinde artık tam alarm ÇALMAZ — sadece
+  // girişte bir kez bildirim + titreşim verir (bkz. monitor_screen.dart'ta
+  // zone artık isAlarm hesabına dahil değil).
+  static Future<void> showZoneEnteredNotice(String zoneLabel) async {
+    await _plugin.show(
+      111,
+      '🚫 Yasak Bölgeye Girildi',
+      '"$zoneLabel" bölgesine girdiniz.',
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: [0, 300, 150, 300]);
+    }
+  }
+
+  // Uzaklaştırılan tarafın pili bitmesi, takibin tamamen kesilmesi anlamına
+  // gelir (güvenlik mekanizmasının kendisi çalışamaz olur) — bu yüzden o
+  // taraf için metin daha vurgulu/acil.
+  static Future<void> showBatteryWarning(int level, {required bool critical, bool isTracked = false}) async {
+    final title = critical ? '🔴 Pil Kritik Seviyede (%$level)' : '🟠 Pil Azalıyor (%$level)';
+    final body = critical
+        ? (isTracked ? 'Takip kesilebilir — LÜTFEN HEMEN telefonu şarja tak!' : 'Takip kesilebilir — telefonu en kısa sürede şarja tak.')
+        : (isTracked ? 'Pilin biterse takip kesilir. Şarja takmayı unutma.' : 'Konum paylaşımının kesilmemesi için telefonu şarja takmayı unutma.');
     await _plugin.show(
       critical ? 103 : 102,
-      critical ? '🔴 Pil Kritik Seviyede (%$level)' : '🟠 Pil Azalıyor (%$level)',
-      critical
-          ? 'Takip kesilebilir — telefonu en kısa sürede şarja tak.'
-          : 'Konum paylaşımının kesilmemesi için telefonu şarja takmayı unutma.',
+      title,
+      body,
       const NotificationDetails(android: AndroidNotificationDetails(
         'uzakdur_battery', 'UZAKDUR Pil Uyarısı',
         importance: Importance.high, priority: Priority.high,

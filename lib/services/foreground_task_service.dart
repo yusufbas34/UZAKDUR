@@ -19,6 +19,13 @@ class _ProximityHandler extends TaskHandler {
   bool _alarming = false;
   String _lastTier = 'safe'; // 'safe' | 'sinir' | 'kritik' — bir önceki tam kontroldeki en kötü kademe (acil hariç)
   String _lastRouteTier = 'safe'; // aynı, ama rota (güzergah) bölgeleri için — asla 'acil' olmaz
+  DateTime? _lastRouteRepeatAt; // rota 'sinir' (içeride) durumunda 30sn'de bir tekrar bildirim için
+  String? _lastBreachedZoneId; // yasak bölgeye en son ne zaman girildiği — tekrar bildirim göndermemek için
+  // Bildirim üzerindeki "Alarmı Durdur" butonuna basıldığında alarm tamamen
+  // kapanmıyor — tehlike sürüyorsa kademeli olarak (30sn/60sn/120sn) geri
+  // geliyor (uygulama içindeki davranışla aynı, bkz. monitor_screen.dart).
+  int _alarmStopCount = 0;
+  DateTime? _alarmSnoozedUntil;
   bool _startErrorCleared = false;
   int _tick = 0;
   final _battery = Battery();
@@ -57,20 +64,27 @@ class _ProximityHandler extends TaskHandler {
 
   // Pil %30 altına düşünce bir kez, %15 altına düşünce bir kez daha uyarır
   // (SharedPreferences'taki kademe izolat yeniden başlasa da hatırlanır).
-  // Pil %40'ın üstüne çıkınca kademe sıfırlanır, böylece bir sonraki
-  // deşarj döngüsünde uyarılar yeniden tetiklenebilir.
-  Future<void> _checkBatteryWarning(int level) async {
+  // Kullanıcı şarja takmazsa (seviye yükselmezse) yarım saatte bir aynı
+  // uyarı tekrarlanır. Pil %40'ın üstüne çıkınca kademe sıfırlanır, böylece
+  // bir sonraki deşarj döngüsünde uyarılar yeniden tetiklenebilir.
+  Future<void> _checkBatteryWarning(int level, {required bool isTracked}) async {
     final prefs = await SharedPreferences.getInstance();
     final tier = prefs.getInt('battery_warn_tier') ?? 0;
+    final lastWarnTs = prefs.getInt('battery_warn_last_ts') ?? 0;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    const recheckMs = 30 * 60 * 1000;
+
     if (level <= 15) {
-      if (tier < 2) {
-        await NotificationService.showBatteryWarning(level, critical: true);
+      if (tier < 2 || (nowMs - lastWarnTs) >= recheckMs) {
+        await NotificationService.showBatteryWarning(level, critical: true, isTracked: isTracked);
         await prefs.setInt('battery_warn_tier', 2);
+        await prefs.setInt('battery_warn_last_ts', nowMs);
       }
     } else if (level <= 30) {
-      if (tier < 1) {
-        await NotificationService.showBatteryWarning(level, critical: false);
+      if (tier < 1 || (nowMs - lastWarnTs) >= recheckMs) {
+        await NotificationService.showBatteryWarning(level, critical: false, isTracked: isTracked);
         await prefs.setInt('battery_warn_tier', 1);
+        await prefs.setInt('battery_warn_last_ts', nowMs);
       }
     } else if (level >= 40 && tier != 0) {
       await prefs.setInt('battery_warn_tier', 0);
@@ -146,9 +160,9 @@ class _ProximityHandler extends TaskHandler {
     final candidates = [_lastMinRatio, _lastZoneRatio].whereType<double>();
     if (candidates.isEmpty) return true;
     final ratio = candidates.reduce((a, b) => a < b ? a : b);
-    if (ratio < 1.3) return true;
-    if (ratio < 2.5) return _tick % 2 == 0;
-    return _tick % 6 == 0;
+    if (ratio < 1.3) return _tick % 2 == 0;   // yakın: ~10sn
+    if (ratio < 2.5) return _tick % 12 == 0;  // orta: ~1dk
+    return _tick % 24 == 0;                   // uzak: ~2dk
   }
 
   @override
@@ -199,6 +213,7 @@ class _ProximityHandler extends TaskHandler {
   // aralığa bağlı (uygulama ekranı açıkken bu geçerli değil, oradaki canlı
   // harita akışı ayrı ve sürekli).
   static const _locationPollTicks = 60; // 60 * 5sn = 5 dakika
+  static const _batteryReportTicks = 120; // 120 * 5sn = 10 dakika
 
   Future<void> _pollLocation() async {
     try {
@@ -240,11 +255,12 @@ class _ProximityHandler extends TaskHandler {
     await _checkLocationRequest();
     _tick++;
     if (_tick % _locationPollTicks == 0) await _pollLocation();
-    if (_tick % 12 == 0) { // ~every 60s at 5s interval
+    if (_tick % _batteryReportTicks == 0) {
       try {
         final level = await _battery.batteryLevel;
         await LocationService.writeBattery(_deviceId, level);
-        await _checkBatteryWarning(level);
+        final roleSnap = await FirebaseDatabase.instance.ref('devices/$_deviceId/role').get();
+        await _checkBatteryWarning(level, isTracked: roleSnap.value == 'tracked');
       } catch (_) {}
     }
     if (_myLat == null || _myLon == null) return;
@@ -263,10 +279,11 @@ class _ProximityHandler extends TaskHandler {
       final pairsMap = pairsSnap.value as Map?;
       if (pairsMap == null) return;
 
-      ZoneData? alarmZone;
       double? alarmDistance;
       String? alarmSoundId;
       bool anyAlarm = false;
+      ZoneData? breachedZoneOverall;
+      String? breachedZonePairId;
       // Üç kademeli sistem: sınırın (pair.threshold) %50'sinin altı ACİL (tam
       // alarm), %50-%80 arası KRİTİK, %80-%100 arası SINIR (yeni girildi).
       // Birden fazla eşleşme varsa en kötü (en yakın) kademe esas alınır.
@@ -274,7 +291,7 @@ class _ProximityHandler extends TaskHandler {
       String? worstTierPairId;
       double? worstTierDistance;
       // Rota (güzergah) bölgeleri sadece kademeli kritik/sınır uyarısı verir,
-      // asla tam alarm tetiklemez.
+      // asla tam alarm tetiklemez. Her iki taraf da değerlendirilir.
       String worstRouteTier = 'safe';
       String? worstRouteLabel;
       double? worstRouteDistance;
@@ -292,45 +309,60 @@ class _ProximityHandler extends TaskHandler {
         }
         if (pair.protectedDeviceId != _deviceId && pair.trackedDeviceId != _deviceId) continue;
 
-        ZoneData? breachedZone;
-        if (role == 'tracked') {
-          // Yasak bölgeler pair'e değil korunan cihaza bağlıdır (eşleşme
-          // silinip yeniden kurulunca kaybolmasın diye).
-          final zonesSnap = await FirebaseDatabase.instance.ref('devices/${pair.protectedDeviceId}/zones').get();
-          final zonesMap = zonesSnap.value as Map?;
-          final pairZones = <ZoneData>[];
-          if (zonesMap != null) {
-            zonesMap.forEach((zid, zval) {
-              try { pairZones.add(ZoneData.fromMap(zid as String, zval as Map)); } catch (_) {}
-            });
-          }
-          zonesSeen.addAll(pairZones);
-          for (final z in pairZones) {
-            final zd = z.distanceFrom(_myLat!, _myLon!);
-            if (z.type == 'route') {
-              if (z.threshold <= 0) continue;
-              final ratio = zd / z.threshold;
-              String rTier = 'safe';
-              if (ratio <= kKritikRatio) rTier = 'kritik';
-              else if (ratio <= 1.0) rTier = 'sinir';
-              if (rTier == 'kritik' && worstRouteTier != 'kritik') {
-                worstRouteTier = 'kritik'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pairId;
-              }
-              if (rTier == 'sinir' && worstRouteTier == 'safe') {
-                worstRouteTier = 'sinir'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pairId;
-              }
-              continue;
-            }
-            if (zd < z.threshold) { breachedZone = z; break; }
-          }
-        }
-
         final otherId = pair.otherDeviceId(_deviceId);
         final locSnap = await FirebaseDatabase.instance.ref('locations/$otherId').get();
         double? d;
+        LocationData? other;
         if (locSnap.exists && locSnap.value != null) {
-          final other = LocationData.fromMap(locSnap.value as Map);
+          try { other = LocationData.fromMap(locSnap.value as Map); } catch (_) {}
+        }
+        if (other != null) {
           d = LocationService.calculateDistance(_myLat!, _myLon!, other.lat, other.lon);
+        }
+
+        // Yasak bölgeler (daire, korunan cihaza bağlı — eşleşme silinip
+        // yeniden kurulunca kaybolmasın diye) hem tam alarm (uzaklaştırılan
+        // için) hem rota (güzergah, her iki taraf için) kontrolünde kullanılır.
+        final zonesSnap = await FirebaseDatabase.instance.ref('devices/${pair.protectedDeviceId}/zones').get();
+        final zonesMap = zonesSnap.value as Map?;
+        final pairZones = <ZoneData>[];
+        if (zonesMap != null) {
+          zonesMap.forEach((zid, zval) {
+            try { pairZones.add(ZoneData.fromMap(zid as String, zval as Map)); } catch (_) {}
+          });
+        }
+        zonesSeen.addAll(pairZones);
+
+        // Rota yakınlığı: uzaklaştırılan kendi konumuna göre, korunan ise
+        // uzaklaştırılanın (otherId) konumuna göre değerlendirilir.
+        final routeSubjectLat = role == 'protected' ? other?.lat : _myLat;
+        final routeSubjectLon = role == 'protected' ? other?.lon : _myLon;
+
+        ZoneData? breachedZone;
+        for (final z in pairZones) {
+          if (z.type == 'route') {
+            if (z.threshold <= 0 || routeSubjectLat == null || routeSubjectLon == null) continue;
+            final zd = z.distanceFrom(routeSubjectLat, routeSubjectLon);
+            final ratio = zd / z.threshold;
+            String rTier = 'safe';
+            if (ratio <= kKritikRatio) rTier = 'kritik';
+            else if (ratio <= 1.0) rTier = 'sinir';
+            if (rTier == 'kritik' && worstRouteTier != 'kritik') {
+              worstRouteTier = 'kritik'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pairId;
+            }
+            if (rTier == 'sinir' && worstRouteTier == 'safe') {
+              worstRouteTier = 'sinir'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pairId;
+            }
+            continue;
+          }
+          if (role == 'tracked' && _myLat != null && _myLon != null) {
+            final zd = z.distanceFrom(_myLat!, _myLon!);
+            if (zd < z.threshold) { breachedZone = z; break; }
+          }
+        }
+        if (breachedZone != null && breachedZoneOverall == null) {
+          breachedZoneOverall = breachedZone;
+          breachedZonePairId = pairId;
         }
 
         bool proximityAlarm = false;
@@ -350,18 +382,11 @@ class _ProximityHandler extends TaskHandler {
         if (tier == 'kritik' && worstTier != 'kritik') { worstTier = 'kritik'; worstTierPairId = pairId; worstTierDistance = d; }
         if (tier == 'sinir' && worstTier == 'safe') { worstTier = 'sinir'; worstTierPairId = pairId; worstTierDistance = d; }
 
-        final isAlarm = proximityAlarm || breachedZone != null;
-
-        if (isAlarm) {
+        if (proximityAlarm) {
           anyAlarm = true;
-          alarmZone ??= breachedZone;
           alarmDistance ??= d;
           alarmSoundId ??= pair.alarmSound;
-          if (breachedZone != null) {
-            await LocationService.writeAlarmLog(pairId, _deviceId, 0, type: 'zone', zoneLabel: breachedZone.label);
-          } else if (d != null) {
-            await LocationService.writeAlarmLog(pairId, _deviceId, d);
-          }
+          await LocationService.writeAlarmLog(pairId, _deviceId, d ?? 0);
         }
       }
       _lastMinRatio = minRatio;
@@ -370,17 +395,43 @@ class _ProximityHandler extends TaskHandler {
 
       sendPort?.send({'type': 'distance', 'value': alarmDistance});
 
+      // Yasak bölgeye YENİ girildiğinde (tam alarm DEĞİL) bir kez
+      // bildirim+titreşim; aynı bölgede kalırken tekrar etmez.
+      if (breachedZoneOverall != null && breachedZoneOverall.id != _lastBreachedZoneId) {
+        await NotificationService.showZoneEnteredNotice(breachedZoneOverall.label);
+        if (breachedZonePairId != null) {
+          await LocationService.writeAlarmLog(breachedZonePairId, _deviceId, 0, type: 'zone', zoneLabel: breachedZoneOverall.label);
+        }
+      }
+      _lastBreachedZoneId = breachedZoneOverall?.id;
+
+      final nowDt = DateTime.now();
+      // "Alarmı Durdur" butonuna basıldığında tehlike hâlâ sürüyorsa
+      // kademeli olarak (30sn/60sn/120sn) geri gelir (bkz. onButtonPressed).
+      final snoozed = anyAlarm && _alarmSnoozedUntil != null && nowDt.isBefore(_alarmSnoozedUntil!);
+      final showAlarm = anyAlarm && !snoozed;
+      if (!anyAlarm) { _alarmStopCount = 0; _alarmSnoozedUntil = null; }
+
       if (anyAlarm) {
-        if (!_alarming) {
-          _alarming = true;
-          await NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
+        if (showAlarm) {
+          if (!_alarming) {
+            _alarming = true;
+            await NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
+          }
+          FlutterForegroundTask.updateService(
+            notificationTitle: '⚠️ YAKLAŞMA — ${alarmDistance?.round()}m',
+            notificationText: 'Aktif alarm',
+          );
+        } else {
+          if (_alarming) { _alarming = false; await NotificationService.stopAlarm(); }
+          FlutterForegroundTask.updateService(
+            notificationTitle: '⏸ Uyarı Ertelendi',
+            notificationText: 'Tehlike sürüyor, tekrar kontrol ediliyor…',
+          );
         }
         _lastTier = 'safe';
         _lastRouteTier = 'safe';
-        FlutterForegroundTask.updateService(
-          notificationTitle: alarmZone != null ? '⚠️ YASAK BÖLGE — ${alarmZone.label}' : '⚠️ YAKLAŞMA — ${alarmDistance?.round()}m',
-          notificationText: 'Aktif alarm',
-        );
+        _lastRouteRepeatAt = null;
       } else {
         if (_alarming) { _alarming = false; await NotificationService.stopAlarm(); }
         // Sadece kademe KÖTÜLEŞTİĞİNDE bildirim/titreşim tetiklenir, aynı
@@ -398,12 +449,27 @@ class _ProximityHandler extends TaskHandler {
         }
         _lastTier = worstTier;
 
-        if (role == 'tracked' && worstRouteTier != _lastRouteTier && worstRouteTier != 'safe') {
-          await NotificationService.showRouteProximityNotice(worstRouteLabel ?? 'Yol', critical: worstRouteTier == 'kritik');
-          if (worstRoutePairId != null) {
-            await LocationService.writeAlarmLog(worstRoutePairId, _deviceId, worstRouteDistance ?? 0,
-                type: worstRouteTier, zoneLabel: worstRouteLabel);
+        // Rota: 'kritik' (yaklaşıyor) sadece kademe kötüleştiğinde bir kez;
+        // 'sinir' (güzergahın içinde) girişte bir kez VE çıkana kadar
+        // 30sn'de bir tekrarlanır — hem korunan hem uzaklaştırılan için.
+        if (worstRouteTier != 'safe') {
+          final isNewTier = worstRouteTier != _lastRouteTier;
+          final dueForRepeat = worstRouteTier == 'sinir' && _lastRouteTier == 'sinir' &&
+              _lastRouteRepeatAt != null && nowDt.difference(_lastRouteRepeatAt!) >= const Duration(seconds: 30);
+          if (isNewTier || dueForRepeat) {
+            if (worstRouteTier == 'kritik') {
+              await NotificationService.showRouteApproachNotice(worstRouteLabel ?? 'Yol', isProtectedSide: role == 'protected');
+            } else {
+              await NotificationService.showRouteInsideNotice(worstRouteLabel ?? 'Yol', isProtectedSide: role == 'protected');
+              _lastRouteRepeatAt = nowDt;
+            }
+            if (worstRoutePairId != null) {
+              await LocationService.writeAlarmLog(worstRoutePairId, _deviceId, worstRouteDistance ?? 0,
+                  type: worstRouteTier, zoneLabel: worstRouteLabel);
+            }
           }
+        } else {
+          _lastRouteRepeatAt = null;
         }
         _lastRouteTier = worstRouteTier;
 
@@ -422,7 +488,18 @@ class _ProximityHandler extends TaskHandler {
   }
 
   @override
-  void onButtonPressed(String id) { if (id == 'stop_alarm') NotificationService.stopAlarm(); }
+  // Uygulama içindeki "ALARMI DURDUR" ile aynı kademeli erteleme mantığı
+  // (30sn/60sn/120sn) — ama burada arka plan isolate'i bir dialog
+  // gösteremediği için "iyi misin" onayı bu yoldan sorulamıyor; 3. kezden
+  // sonra sadece 120sn'de bir ertelemeye devam eder. Uygulama açıldığında
+  // ön plandaki mantık devralır.
+  void onButtonPressed(String id) {
+    if (id != 'stop_alarm') return;
+    _alarmStopCount++;
+    final seconds = _alarmStopCount == 1 ? 30 : _alarmStopCount == 2 ? 60 : 120;
+    _alarmSnoozedUntil = DateTime.now().add(Duration(seconds: seconds));
+    NotificationService.stopAlarm();
+  }
   @override
   void onNotificationPressed() {}
 }

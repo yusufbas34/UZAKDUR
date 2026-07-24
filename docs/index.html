@@ -450,9 +450,10 @@
     <div id="detailReq"></div>
 
     <div class="row" style="justify-content:space-between; margin-top:20px;">
-      <h2 style="margin:0;">Yasak Bölgeler</h2>
-      <button class="secondary" onclick="openZonePicker()">+ Bölge Ekle</button>
+      <h2 style="margin:0;">Yasak Bölgeler &amp; Yol Güzergahları</h2>
+      <button class="secondary" onclick="openZonePicker()">+ Bölge / Yol Ekle</button>
     </div>
+    <small class="hint" style="margin-bottom:8px;">Açılan pencerede "⭕ Nokta (Daire)" ile yasak bölge, "🛣️ Yol (Koridor)" ile korunanın düzenli kullandığı bir güzergah (iş/okul yolu vb.) ekleyebilirsin.</small>
     <div id="zoneList"></div>
 
     <h2 style="margin-top:20px;">Acil Durum Kişileri</h2>
@@ -855,14 +856,18 @@ function eventPairLabel(e) {
 
 function eventLine(e) {
   const type = e.type || 'proximity';
+  const roleLabel = e.role === 'tracked' ? '🎯 Uzaklaştırılan' : e.role === 'protected' ? '🛡️ Korunan' : 'Cihaz';
   if (type === 'panic') return `PANİK sinyali`;
+  if (type === 'emergency_confirmed') return `🆘 "İyi misin?" sorusuna "evet" dedi — acil durum bilgilendirmesi istendi`;
   if (type === 'uninstall_attempt') return `🚨 ${e.deviceName || 'Cihaz'} — silme girişimi (cihaz yöneticisi izni kapatıldı)`;
   if (type === 'zone') return `Yasak bölgeye girdi: ${e.zoneLabel || ''}`;
   if (type === 'tamper') return `beklenmedik şekilde çevrimdışı oldu`;
   if (type === 'pair_removed') return `Eşleşme sonlandırıldı`;
   if (type === 'pair_created') return e.isRepair ? `Eşleşme yeniden kuruldu (geçmiş korunuyor)` : `Eşleşme oluşturuldu`;
-  if (type === 'battery_critical') return `pil kritik seviyede (%${e.battery})`;
-  if (type === 'battery_low') return `pil azalıyor (%${e.battery})`;
+  // Uzaklaştırılan tarafın pili bitmesi takibin tamamen kesilmesi demektir —
+  // bu yüzden o taraf için daha vurgulu bir metin gösteriliyor.
+  if (type === 'battery_critical') return `${roleLabel} pili kritik seviyede (%${e.battery})${e.role === 'tracked' ? ' — TAKİP KESİLEBİLİR!' : ''}`;
+  if (type === 'battery_low') return `${roleLabel} pili azalıyor (%${e.battery})${e.role === 'tracked' ? ' — takip riske girebilir' : ''}`;
   if (type === 'kritik') return e.zoneLabel ? `"${e.zoneLabel}" güzergahına kritik yaklaşma` : `Kritik seviyede yaklaşma (${e.distance}m)`;
   if (type === 'sinir') return e.zoneLabel ? `"${e.zoneLabel}" güzergahına yaklaştı` : `Sınır içine girildi (${e.distance}m)`;
   return `${e.distance}m mesafeye yaklaştı`;
@@ -1205,6 +1210,7 @@ function render() {
           <div class="pair-line pair-card-title" onclick="openDetail('${pid}')">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
           <div class="row" style="gap:8px;">
             <button class="secondary" onclick="openDetail('${pid}')">Detay</button>
+            <button class="secondary" onclick="exportPdf('${pid}')">📄 PDF</button>
             <button class="secondary" onclick="removePair('${pid}')">Eşleşmeyi Kaldır</button>
           </div>
         </div>
@@ -1554,7 +1560,7 @@ function checkBatteryLevels() {
     else if (level >= 40) { tier = 0; }
     if (type) {
       for (const pid of pairIdsForDevice(id)) {
-        logEvent(pid, type, { byDeviceId: id, battery: level });
+        logEvent(pid, type, { byDeviceId: id, battery: level, role: d.role });
       }
     }
     prevBatteryTier[id] = tier;
@@ -1809,16 +1815,17 @@ function renderContactRequests(pairId) {
 // uyumluluk için, Apps Script tarafında da aynı varsayım geçerli.
 const EMAIL_ALERT_TYPE_LABELS = {
   panic: '🆘 Panik',
-  zone: '🚫 Yasak Bölge (tam alarm)',
+  emergency_confirmed: '🆘 Onaylı Acil Durum ("İyi misin?" sonrası)',
+  zone: '🚫 Yasak Bölge (tek seferlik bildirim)',
   proximity: '⚠️ Acil Yaklaşma (tam alarm)',
-  kritik: '🟠 Kritik Yaklaşma',
+  kritik: '🟠 Kritik Yaklaşma (mesafe/güzergah)',
   sinir: '🔵 Sınır İhlali (en hafif kademe)',
   tamper: '📴 Beklenmedik Çevrimdışı',
   battery_critical: '🔴 Pil Kritik',
   battery_low: '🟡 Pil Azalıyor',
   uninstall_attempt: '🗑️ Silme Girişimi',
 };
-const EMAIL_ALERT_TYPE_ORDER = ['panic', 'zone', 'proximity', 'kritik', 'sinir', 'tamper', 'battery_critical', 'battery_low', 'uninstall_attempt'];
+const EMAIL_ALERT_TYPE_ORDER = ['panic', 'emergency_confirmed', 'zone', 'proximity', 'kritik', 'sinir', 'tamper', 'battery_critical', 'battery_low', 'uninstall_attempt'];
 
 function renderEmailAlertTypes(pairId) {
   const p = pairs[pairId];
@@ -1950,39 +1957,76 @@ async function loadDetailHistory(pairId) {
   }
 }
 
-async function exportPdf() {
-  if (!openPairId || !window.jspdf) return;
-  const p = pairs[openPairId];
+// jsPDF varsayılan yazı tipi Türkçe özel karakterleri (ığşöçü) düzgün
+// göstermiyor — rapordaki tüm metinler bu yüzden ASCII'ye çevriliyor.
+function toAsciiTr(s) {
+  return String(s)
+    .replace(/ı/g, 'i').replace(/İ/g, 'I')
+    .replace(/ğ/g, 'g').replace(/Ğ/g, 'G')
+    .replace(/ü/g, 'u').replace(/Ü/g, 'U')
+    .replace(/ş/g, 's').replace(/Ş/g, 'S')
+    .replace(/ö/g, 'o').replace(/Ö/g, 'O')
+    .replace(/ç/g, 'c').replace(/Ç/g, 'C');
+}
+
+// Her önemli uyarının PDF'te (sadece tür/değer değil) tam bir açıklaması
+// olsun diye — eventLine()'ın ASCII'ye çevrilmiş, PDF'e özel hali.
+function pdfEventDescription(e) {
+  const type = e.type || 'proximity';
+  if (type === 'panic') return 'Panik butonuna basildi.';
+  if (type === 'emergency_confirmed') return '"Iyi misin?" sorusuna evet dendi, acil durum bilgilendirmesi istendi.';
+  if (type === 'zone') return `Yasak bolgeye girildi: ${e.zoneLabel || '(isimsiz)'}`;
+  if (type === 'tamper') return 'Cihaz beklenmedik sekilde cevrimdisi oldu.';
+  if (type === 'pair_removed') return 'Eslesme sonlandirildi.';
+  if (type === 'pair_created') return e.isRepair ? 'Eslesme yeniden kuruldu, gecmis korundu.' : 'Yeni eslesme olusturuldu.';
+  if (type === 'battery_critical') return `Pil kritik seviyede (%${e.battery}).`;
+  if (type === 'battery_low') return `Pil azaliyor (%${e.battery}).`;
+  if (type === 'kritik') return e.zoneLabel ? `"${e.zoneLabel}" guzergahina kritik yaklasma.` : `Esigin %50-80 arasina yaklasildi (${e.distance}m).`;
+  if (type === 'sinir') return e.zoneLabel ? `"${e.zoneLabel}" guzergahina yaklasildi.` : `Esigin %80-100 arasina (sinir) girildi (${e.distance}m).`;
+  return `Esigin %50'sinin altina inildi, tam alarm calisti (${e.distance}m).`;
+}
+
+// pairId verilmezse açık olan vaka detayının pairId'si kullanılır — hem
+// detay ekranındaki "PDF İndir" butonu hem Aktif Eşleşmeler listesindeki
+// hızlı "📄 PDF" butonu aynı fonksiyonu çağırabilsin diye.
+async function exportPdf(pairId) {
+  const pid = pairId || openPairId;
+  if (!pid || !pairs[pid] || !window.jspdf) return;
+  const p = pairs[pid];
   const pName = devices[p.protectedDeviceId]?.name || '?';
   const tName = devices[p.trackedDeviceId]?.name || '?';
-  const log = await fetchJSON(`alarm_log/${openPairId}`);
+  const log = await fetchJSON(`alarm_log/${pid}`);
   const entries = log ? Object.values(log).filter(isValidLogEntry).sort((a, b) => b.ts - a.ts) : [];
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-  doc.setFontSize(16); doc.text('UZAKDUR — Alarm Geçmişi Raporu', 14, 18);
-  doc.setFontSize(10); doc.text(`${pName} <-> ${tName}`, 14, 26);
-  doc.text(`Oluşturulma: ${new Date().toLocaleString('tr-TR')}`, 14, 32);
-  doc.text(`Acil: ${Math.round(p.threshold * 0.5)}m  •  Kritik: ${Math.round(p.threshold * 0.8)}m  •  Sınır: ${p.threshold}m`, 14, 38);
+  doc.setFontSize(16); doc.text('UZAKDUR - Alarm Gecmisi Raporu', 14, 18);
+  doc.setFontSize(10); doc.text(toAsciiTr(`${pName} <-> ${tName}`), 14, 26);
+  doc.text(`Olusturulma: ${new Date().toLocaleString('tr-TR')}`, 14, 32);
+  doc.text(`Acil: ${Math.round(p.threshold * 0.5)}m  -  Kritik: ${Math.round(p.threshold * 0.8)}m  -  Sinir: ${p.threshold}m`, 14, 38);
   let y = 50;
   doc.setFontSize(9);
-  doc.text('Tarih', 14, y); doc.text('Tür', 90, y); doc.text('Değer', 140, y);
+  doc.text('Tarih', 14, y); doc.text('Tur', 68, y); doc.text('Deger', 96, y); doc.text('Aciklama', 122, y);
   y += 4; doc.line(14, y, 196, y); y += 6;
-  if (entries.length === 0) { doc.text('Kayıt yok.', 14, y); }
+  if (entries.length === 0) { doc.text('Kayit yok.', 14, y); }
   for (const e of entries) {
     if (y > 280) { doc.addPage(); y = 20; }
     const type = e.type || 'proximity';
-    const label = type === 'panic' ? 'PANIK' : type === 'zone' ? 'Yasak bolge'
-      : type === 'tamper' ? 'Cevrimdisi' : type === 'kritik' ? 'Kritik yaklasma'
-      : type === 'sinir' ? 'Sinir ihlali' : type === 'pair_created' ? 'Eslesme kuruldu'
-      : type === 'pair_removed' ? 'Eslesme sonlandi' : 'Yaklasma';
-    const value = type === 'zone' || type === 'kritik' || type === 'sinir' ? (e.zoneLabel || (e.distance != null ? `${e.distance}m` : '-'))
-      : type === 'panic' || type === 'tamper' || type === 'pair_created' || type === 'pair_removed' ? '-' : `${e.distance}m`;
+    const label = type === 'panic' ? 'PANIK' : type === 'emergency_confirmed' ? 'Acil onay'
+      : type === 'zone' ? 'Yasak bolge' : type === 'tamper' ? 'Cevrimdisi'
+      : type === 'kritik' ? 'Kritik yaklasma' : type === 'sinir' ? 'Sinir ihlali'
+      : type === 'pair_created' ? 'Eslesme kuruldu' : type === 'pair_removed' ? 'Eslesme sonlandi'
+      : type === 'battery_critical' ? 'Pil kritik' : type === 'battery_low' ? 'Pil azaliyor' : 'Yaklasma';
+    const value = type === 'zone' || type === 'kritik' || type === 'sinir' ? toAsciiTr(e.zoneLabel || (e.distance != null ? `${e.distance}m` : '-'))
+      : (type === 'battery_critical' || type === 'battery_low') ? `%${e.battery}`
+      : type === 'panic' || type === 'emergency_confirmed' || type === 'tamper' || type === 'pair_created' || type === 'pair_removed' ? '-' : `${e.distance}m`;
+    const desc = toAsciiTr(pdfEventDescription(e)).slice(0, 62);
     doc.text(new Date(e.ts).toLocaleString('tr-TR'), 14, y);
-    doc.text(label, 90, y);
-    doc.text(String(value), 140, y);
+    doc.text(label, 68, y);
+    doc.text(String(value), 96, y);
+    doc.text(desc, 122, y);
     y += 6;
   }
-  doc.save(`uzakdur-${pName}-${tName}.pdf`);
+  doc.save(`uzakdur-${toAsciiTr(pName)}-${toAsciiTr(tName)}.pdf`);
 }
 
 async function saveDetailThreshold() {

@@ -74,8 +74,15 @@ class _MonitorScreenState extends State<MonitorScreen>
   bool _isAlarm = false, _isRunning = false;
   String _lastTier = 'safe'; // 'safe' | 'sinir' | 'kritik' — bir önceki tick'teki en kötü kademe (acil hariç)
   String _lastRouteTier = 'safe'; // aynı, ama rota (güzergah) bölgeleri için — asla 'acil' olmaz
+  DateTime? _lastRouteRepeatAt; // rota 'sinir' (içeride) durumunda 30sn'de bir tekrar bildirim için
+  String? _lastBreachedZoneId; // yasak bölgeye (daire) en son ne zaman girildiği — tekrar bildirim göndermemek için
+  // Tam alarmı "Durdur" ile susturmak onu tamamen kapatmıyor — tehlike hâlâ
+  // sürüyorsa kademeli olarak (30sn/60sn/120sn) geri geliyor. 3. kez sonra
+  // "iyi misin" onayı isteniyor.
+  int _alarmStopCount = 0;
+  DateTime? _alarmSnoozedUntil;
+  bool _emergencyPromptPending = false;
   String _statusText = 'GPS bekleniyor…';
-  String? _alarmZoneLabel;
   String? _errorText;
   bool _panicSending = false;
   bool _disguised = false;
@@ -383,10 +390,13 @@ class _MonitorScreenState extends State<MonitorScreen>
       }
       _lastTier = 'safe';
       _lastRouteTier = 'safe';
+      _lastRouteRepeatAt = null;
+      _lastBreachedZoneId = null;
+      _alarmStopCount = 0;
+      _alarmSnoozedUntil = null;
       if (!mounted) return;
       setState(() {
         _isAlarm = false;
-        _alarmZoneLabel = null;
         _distance = null;
         _statusText = 'Eşleştirme yok';
       });
@@ -394,9 +404,13 @@ class _MonitorScreenState extends State<MonitorScreen>
       return;
     }
     String? alarmPairId;
-    ZoneData? alarmZone;
     double? alarmDistance;
     String? alarmSoundId;
+    // Yasak bölge (daire) artık tam alarm tetiklemiyor — sadece girişte bir
+    // kez bildirim+titreşim verir (bkz. aşağı). Burada sadece admin panel
+    // durumu için ayrıca izleniyor.
+    ZoneData? breachedZone;
+    String? breachedZonePairId;
     // Üç kademeli sistem: sınırın (pair.threshold) %50'sinin altı ACİL (tam
     // alarm), %50-%80 arası KRİTİK, %80-%100 arası SINIR (yeni girildi).
     // Birden fazla eşleşme varsa en kötü (en yakın) kademe esas alınır.
@@ -405,7 +419,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     double? worstTierDistance;
     // Rota (güzergah) bölgeleri sadece kademeli kritik/sınır uyarısı verir,
     // asla tam alarm tetiklemez — konum zaten açık olduğu için gerçekten
-    // yaklaşılırsa normal eşik sistemi zaten devreye girer.
+    // yaklaşılırsa normal eşik sistemi zaten devreye girer. Her iki taraf da
+    // (korunan + uzaklaştırılan) bilgilendirilir, sadece metin farklıdır.
     String worstRouteTier = 'safe';
     String? worstRouteLabel;
     double? worstRouteDistance;
@@ -417,25 +432,35 @@ class _MonitorScreenState extends State<MonitorScreen>
       final pair = entry.value;
       final otherLoc = _otherLocByPair[pid];
 
+      // Yasak bölge (daire) sadece uzaklaştırılan tarafında, kendi konumuna
+      // göre değerlendirilir.
       ZoneData? zone;
       if (!_isProtected && _myLocation != null) {
         for (final z in (_zonesByPair[pid] ?? const <ZoneData>[])) {
+          if (z.type == 'route') continue;
           final zd = z.distanceFrom(_myLocation!.lat, _myLocation!.lon);
-          if (z.type == 'route') {
-            if (z.threshold <= 0) continue;
-            final ratio = zd / z.threshold;
-            String rTier = 'safe';
-            if (ratio <= kKritikRatio) rTier = 'kritik';
-            else if (ratio <= 1.0) rTier = 'sinir';
-            if (rTier == 'kritik' && worstRouteTier != 'kritik') {
-              worstRouteTier = 'kritik'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pid;
-            }
-            if (rTier == 'sinir' && worstRouteTier == 'safe') {
-              worstRouteTier = 'sinir'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pid;
-            }
-            continue; // rota bölgeleri bu döngüde tam alarm adayı olamaz
-          }
           if (zd < z.threshold) { zone = z; break; }
+        }
+      }
+
+      // Rota (güzergah) yakınlığı HER İKİ tarafta da değerlendirilir:
+      // uzaklaştırılan kendi konumuna göre, korunan ise uzaklaştırılanın
+      // konumuna göre (kendi güzergahına ne kadar yaklaşmış).
+      final routeSubjectLoc = _isProtected ? otherLoc : _myLocation;
+      if (routeSubjectLoc != null) {
+        for (final z in (_zonesByPair[pid] ?? const <ZoneData>[])) {
+          if (z.type != 'route' || z.threshold <= 0) continue;
+          final zd = z.distanceFrom(routeSubjectLoc.lat, routeSubjectLoc.lon);
+          final ratio = zd / z.threshold;
+          String rTier = 'safe';
+          if (ratio <= kKritikRatio) rTier = 'kritik';
+          else if (ratio <= 1.0) rTier = 'sinir';
+          if (rTier == 'kritik' && worstRouteTier != 'kritik') {
+            worstRouteTier = 'kritik'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pid;
+          }
+          if (rTier == 'sinir' && worstRouteTier == 'safe') {
+            worstRouteTier = 'sinir'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pid;
+          }
         }
       }
 
@@ -454,23 +479,40 @@ class _MonitorScreenState extends State<MonitorScreen>
       if (tier == 'kritik' && worstTier != 'kritik') { worstTier = 'kritik'; worstTierPairId = pid; worstTierDistance = d; }
       if (tier == 'sinir' && worstTier == 'safe') { worstTier = 'sinir'; worstTierPairId = pid; worstTierDistance = d; }
 
-      final isAlarm = proximityAlarm || zone != null;
-      newStatus[pid] = isAlarm ? 'acil' : (tier != 'safe' ? tier : (d != null ? 'safe' : 'unknown'));
+      if (zone != null && breachedZone == null) { breachedZone = zone; breachedZonePairId = pid; }
+      newStatus[pid] = (proximityAlarm || zone != null) ? 'acil' : (tier != 'safe' ? tier : (d != null ? 'safe' : 'unknown'));
 
-      if (isAlarm) {
-        if (zone != null) {
-          LocationService.writeAlarmLog(pid, widget.deviceId, 0, type: 'zone', zoneLabel: zone.label);
-        } else if (d != null) {
-          LocationService.writeAlarmLog(pid, widget.deviceId, d);
-        }
+      if (proximityAlarm) {
+        LocationService.writeAlarmLog(pid, widget.deviceId, d ?? 0);
         alarmPairId ??= pid;
-        alarmZone ??= zone;
         alarmDistance ??= d;
         alarmSoundId ??= pair.alarmSound;
       }
     }
 
+    // Yasak bölgeye YENİ girildiğinde (bir önceki tick'te farklı bir bölgede
+    // ya da hiç bölgede değildiyken) bir kez bildirim+titreşim; aynı bölgede
+    // kalırken tekrar etmez, çıkıp tekrar girerse yeniden bildirir.
+    if (breachedZone != null && breachedZone.id != _lastBreachedZoneId) {
+      HapticFeedback.mediumImpact();
+      NotificationService.showZoneEnteredNotice(breachedZone.label);
+      if (breachedZonePairId != null) {
+        LocationService.writeAlarmLog(breachedZonePairId, widget.deviceId, 0, type: 'zone', zoneLabel: breachedZone.label);
+      }
+    }
+    _lastBreachedZoneId = breachedZone?.id;
+
     final isAlarm = alarmPairId != null;
+    final nowDt = DateTime.now();
+    // Tehlike hâlâ sürüyor ama kullanıcı "Durdur"a bastığı için ertelenmiş —
+    // bu süre boyunca ses/ekran susar ama arka planda gerçek durum takip
+    // edilmeye devam eder.
+    final snoozed = isAlarm && _alarmSnoozedUntil != null && nowDt.isBefore(_alarmSnoozedUntil!);
+    final snoozeJustExpired = isAlarm && !snoozed && _alarmSnoozedUntil != null;
+    if (snoozeJustExpired) _alarmSnoozedUntil = null;
+    final showAlarm = isAlarm && !snoozed;
+    if (!isAlarm) { _alarmStopCount = 0; _alarmSnoozedUntil = null; }
+
     final now = _fmt.format(DateTime.now());
     if (!mounted) return;
     setState(() {
@@ -481,34 +523,46 @@ class _MonitorScreenState extends State<MonitorScreen>
       // partnere manuel dokunduğunda odak sürekli geri sıçrıyordu. Genel
       // alarm göstergeleri (ses/animasyon/durdur çubuğu) zaten odaktan
       // bağımsız olarak çalışmaya devam ediyor, güvenlik kaybı yok.
-      if (isAlarm && alarmPairId != _lastAlarmPairId) {
+      if (showAlarm && alarmPairId != _lastAlarmPairId) {
         _focusedPairId = alarmPairId;
       }
-      _lastAlarmPairId = isAlarm ? alarmPairId : null;
+      _lastAlarmPairId = showAlarm ? alarmPairId : null;
       final focusedOtherLoc = _otherLocation;
       _distance = (_myLocation != null && focusedOtherLoc != null)
           ? LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, focusedOtherLoc.lat, focusedOtherLoc.lon)
           : null;
-      _isAlarm = isAlarm;
-      _alarmZoneLabel = isAlarm ? alarmZone?.label : null;
-      _statusText = isAlarm
-          ? (alarmZone != null ? 'Yasak bölgede: ${alarmZone.label}' : 'Yaklaşma tespit edildi!')
-          : worstTier == 'kritik'
-              ? 'Kritik — Hızla yaklaşıyor'
-              : worstTier == 'sinir'
-                  ? 'Sınır içine girildi'
-                  : 'Güvenli mesafede';
-      if (_distance != null && (_log.isEmpty || _log.first.isAlarm != isAlarm)) {
-        _log.insert(0, LogEntry(now, _distance!, isAlarm));
+      _isAlarm = showAlarm;
+      _statusText = showAlarm
+          ? 'Yaklaşma tespit edildi!'
+          : isAlarm && snoozed
+              ? 'Uyarı ertelendi — tekrar kontrol ediliyor'
+              : worstTier == 'kritik'
+                  ? 'Kritik — Hızla yaklaşıyor'
+                  : worstTier == 'sinir'
+                      ? 'Sınır içine girildi'
+                      : 'Güvenli mesafede';
+      if (_distance != null && (_log.isEmpty || _log.first.isAlarm != showAlarm)) {
+        _log.insert(0, LogEntry(now, _distance!, showAlarm));
         if (_log.length > 100) _log.removeLast();
       }
     });
 
     if (isAlarm) {
-      if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
-      NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
+      if (showAlarm) {
+        if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
+        NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
+      } else {
+        _alarmCtrl.stop(); _alarmCtrl.reset();
+      }
       _lastTier = 'safe';
       _lastRouteTier = 'safe';
+      _lastRouteRepeatAt = null;
+      // Erteleme süresi doldu ve tehlike hâlâ sürüyor: 3. "Durdur"dan sonraki
+      // ilk gerçek dönüşte kullanıcıya "iyi misin" diye sorulur.
+      if (snoozeJustExpired && _emergencyPromptPending) {
+        _emergencyPromptPending = false;
+        _showEmergencyCheckIn();
+      }
     } else {
       _alarmCtrl.stop(); _alarmCtrl.reset();
       NotificationService.stopAlarm();
@@ -537,17 +591,79 @@ class _MonitorScreenState extends State<MonitorScreen>
       }
       _lastTier = worstTier;
 
-      if (!_isProtected && worstRouteTier != _lastRouteTier && worstRouteTier != 'safe') {
-        HapticFeedback.selectionClick();
-        NotificationService.showRouteProximityNotice(worstRouteLabel ?? 'Yol', critical: worstRouteTier == 'kritik');
-        if (worstRoutePairId != null) {
-          LocationService.writeAlarmLog(worstRoutePairId, widget.deviceId, worstRouteDistance ?? 0,
-              type: worstRouteTier, zoneLabel: worstRouteLabel);
+      // Rota: 'kritik' (yaklaşıyor) sadece kademe kötüleştiğinde bir kez;
+      // 'sinir' (güzergahın içinde) girişte bir kez VE çıkana kadar 30sn'de
+      // bir tekrarlanır — hem korunan hem uzaklaştırılan için.
+      if (worstRouteTier != 'safe') {
+        final isNewTier = worstRouteTier != _lastRouteTier;
+        final dueForRepeat = worstRouteTier == 'sinir' && _lastRouteTier == 'sinir' &&
+            _lastRouteRepeatAt != null && nowDt.difference(_lastRouteRepeatAt!) >= const Duration(seconds: 30);
+        if (isNewTier || dueForRepeat) {
+          HapticFeedback.selectionClick();
+          if (worstRouteTier == 'kritik') {
+            NotificationService.showRouteApproachNotice(worstRouteLabel ?? 'Yol', isProtectedSide: _isProtected);
+          } else {
+            NotificationService.showRouteInsideNotice(worstRouteLabel ?? 'Yol', isProtectedSide: _isProtected);
+            _lastRouteRepeatAt = nowDt;
+          }
+          if (worstRoutePairId != null) {
+            LocationService.writeAlarmLog(worstRoutePairId, widget.deviceId, worstRouteDistance ?? 0,
+                type: worstRouteTier, zoneLabel: worstRouteLabel);
+          }
         }
+      } else {
+        _lastRouteRepeatAt = null;
       }
       _lastRouteTier = worstRouteTier;
     }
     _updateMap();
+  }
+
+  // Tam alarmı geçici olarak durdurur — ama tehlike hâlâ sürüyorsa kademeli
+  // olarak (1. kez 30sn, 2. kez 60sn, 3. kez 120sn sonra) geri gelir. 3.
+  // kezden sonraki ilk gerçek dönüşte kullanıcıya durumu sorulur.
+  void _snoozeAlarm() {
+    _alarmStopCount++;
+    final seconds = _alarmStopCount == 1 ? 30 : _alarmStopCount == 2 ? 60 : 120;
+    _alarmSnoozedUntil = DateTime.now().add(Duration(seconds: seconds));
+    if (_alarmStopCount >= 3) _emergencyPromptPending = true;
+    NotificationService.stopAlarm();
+    _alarmCtrl.stop(); _alarmCtrl.reset();
+    if (!mounted) return;
+    setState(() => _isAlarm = false);
+  }
+
+  Future<void> _showEmergencyCheckIn() async {
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('İyi misin?', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        content: Text(
+          'Yaklaşma uyarısı birkaç kez tekrarlandı. Acil durum kişilerine (mail/telefon) haber verilsin mi?',
+          style: GoogleFonts.inter(color: AppColors.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Hayır, iyiyim', style: GoogleFonts.inter(color: AppColors.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Evet, haber ver', style: GoogleFonts.inter(color: AppColors.danger, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (confirmed == true) await _escalateEmergencyContact();
+  }
+
+  // Kullanıcı "iyi misin" sorusuna "evet, haber ver" dediğinde çağrılır.
+  // Doğrudan mailto açmak yerine bir alarm_log kaydı yazıyoruz — Apps
+  // Script bunu görüp (pairs/{id}/emailAlertTypes ayarına göre) korunan
+  // cihazın GERÇEK acil durum kişilerine otomatik mail atıyor; bu, hangi
+  // taraf onayladıysa onaylasın doğru kişi listesine ulaşmayı garantiler.
+  Future<void> _escalateEmergencyContact() async {
+    if (_pairs.isEmpty) return;
+    for (final pid in _pairs.keys) {
+      await LocationService.writeAlarmLog(pid, widget.deviceId, _distance ?? 0, type: 'emergency_confirmed');
+    }
   }
 
   Future<void> _triggerPanic() async {
@@ -1391,7 +1507,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     child: Row(children: [
       Container(width: 36, height: 36,
           decoration: BoxDecoration(color: _statusColor.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
-          child: Icon(_alarmZoneLabel != null ? Icons.block_rounded : _isAlarm ? Icons.warning_rounded : Icons.check_circle_rounded, color: _statusColor, size: 18)),
+          child: Icon(_isAlarm ? Icons.warning_rounded : Icons.check_circle_rounded, color: _statusColor, size: 18)),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(_statusText, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: _isAlarm ? AppColors.danger : AppColors.textPrimary)),
@@ -1412,7 +1528,7 @@ class _MonitorScreenState extends State<MonitorScreen>
 
   Widget _buildBottom() {
     if (_isAlarm) return GestureDetector(
-      onTap: () { NotificationService.stopAlarm(); _alarmCtrl.stop(); _alarmCtrl.reset(); setState(() => _isAlarm = false); },
+      onTap: _snoozeAlarm,
       child: AnimatedBuilder(
         animation: _alarmAnim,
         builder: (_, __) => Container(
