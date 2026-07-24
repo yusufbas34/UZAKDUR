@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Herhangi bir cihaz yönetimi politikası (parola, kamera kısıtlama vb.)
+     KULLANMIYORUZ — tek amaç, uygulamanın "Cihaz Yöneticileri" listesine
+     alınıp bu izin kapatılmadan silinemez hale gelmesi ve iznin
+     kapatıldığı anın (onDisabled) yakalanabilmesi. -->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+    </uses-policies>
+</device-admin>

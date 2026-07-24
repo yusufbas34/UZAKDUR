@@ -1,6 +1,9 @@
 package com.uzakdur.app;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.view.KeyEvent;
 import androidx.annotation.NonNull;
@@ -13,6 +16,7 @@ import java.util.Deque;
 public class MainActivity extends FlutterActivity {
     private static final String CHANNEL = "uzakdur/disguise";
     private static final String PANIC_CHANNEL = "uzakdur/panic_keys";
+    private static final String DEVICE_ADMIN_CHANNEL = "uzakdur/device_admin";
     private static final int TRIGGER_PRESSES = 3;
     private static final long TRIGGER_WINDOW_MS = 2000;
 
@@ -38,6 +42,28 @@ public class MainActivity extends FlutterActivity {
                     }
                 });
         panicChannel = new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), PANIC_CHANNEL);
+
+        new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), DEVICE_ADMIN_CHANNEL)
+                .setMethodCallHandler((call, result) -> {
+                    DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(Context.DEVICE_POLICY_SERVICE);
+                    ComponentName adminComponent = new ComponentName(this, UzakdurDeviceAdminReceiver.class);
+                    switch (call.method) {
+                        case "isActive":
+                            result.success(dpm != null && dpm.isAdminActive(adminComponent));
+                            break;
+                        case "requestActivation":
+                            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
+                            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                    "UZAKDUR'un yanlışlıkla ya da bilgin dışında silinmesini engellemek için bu izni ver. " +
+                                    "Uygulamayı silmeden önce bu izni kaldırman gerekir; kaldırdığında yönetici bilgilendirilir.");
+                            startActivity(intent);
+                            result.success(null);
+                            break;
+                        default:
+                            result.notImplemented();
+                    }
+                });
     }
 
     // Ses tuşuna arka arkaya 3 kez basmak, uzun basıştan daha hızlı ve daha

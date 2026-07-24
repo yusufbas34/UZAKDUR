@@ -17,6 +17,7 @@ import '../services/foreground_task_service.dart';
 import '../services/disguise_service.dart';
 import '../services/update_service.dart';
 import '../services/watchdog_service.dart';
+import '../services/device_admin_service.dart';
 import '../theme/app_theme.dart';
 
 class LogEntry {
@@ -78,6 +79,9 @@ class _MonitorScreenState extends State<MonitorScreen>
   bool _disguised = false;
   UpdateInfo? _updateInfo;
   bool _notifDenied = false;
+  // null: henüz kontrol edilmedi (banner o ana kadar gösterilmez, aksi
+  // halde her açılışta bir an için yanlışlıkla "kapalı" görünürdü).
+  bool? _adminProtectionActive;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
   final _battery = Battery();
@@ -118,6 +122,11 @@ class _MonitorScreenState extends State<MonitorScreen>
     ForegroundTaskService.init();
     _checkNotifPermission();
     _start();
+    if (!_isProtected) {
+      // Silme koruması sadece uzaklaştırılan tarafta anlamlı — korunan
+      // tarafın uygulamayı silmesini engellemenin bir güvenlik amacı yok.
+      _checkDeviceAdmin();
+    }
     if (_isProtected) {
       _loadDisguiseState();
       // Ses tuşuna arka arkaya 3 kez basmak da (uygulama ön plandayken)
@@ -139,6 +148,12 @@ class _MonitorScreenState extends State<MonitorScreen>
     final status = await Permission.notification.status;
     if (!mounted) return;
     setState(() => _notifDenied = !status.isGranted);
+  }
+
+  Future<void> _checkDeviceAdmin() async {
+    final active = await DeviceAdminService.isActive();
+    if (!mounted) return;
+    setState(() => _adminProtectionActive = active);
   }
 
   Future<void> _loadDisguiseState() async {
@@ -767,6 +782,8 @@ class _MonitorScreenState extends State<MonitorScreen>
     if (state == AppLifecycleState.resumed) {
       _checkNotifPermission();
       _ensureForegroundServiceAlive();
+      // Kullanıcı Ayarlar'a gidip izni açıp/kapatıp geri dönmüş olabilir.
+      if (!_isProtected) _checkDeviceAdmin();
     }
   }
 
@@ -831,6 +848,7 @@ class _MonitorScreenState extends State<MonitorScreen>
             child: SafeArea(child: Column(children: [
               _buildTopBar(),
               if (_notifDenied) _buildNotifBanner(),
+              if (!_isProtected && _adminProtectionActive == false) _buildAdminBanner(),
               if (_updateInfo != null) _buildUpdateBanner(),
               if (_pairs.isNotEmpty) _buildPartnerStrip(),
               Expanded(child: _errorText != null
@@ -908,6 +926,25 @@ class _MonitorScreenState extends State<MonitorScreen>
         const SizedBox(width: 8),
         Expanded(child: Text('Bildirimler kapalı — mesaj/pil uyarıları hiç görünmez. Açmak için dokun', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.danger))),
         Icon(Icons.chevron_right_rounded, color: AppColors.danger, size: 18),
+      ]),
+    ),
+  );
+
+  // Android'de gerçek bir "şifreyle silme engeli" yok — bu, uygulamayı
+  // silmeden önce Cihaz Yöneticisi iznini elle kapatmayı zorunlu kılan tek
+  // genel mekanizma. Amaç silmeyi imkansız kılmak değil, bu adımın anında
+  // yakalanıp yöneticiye bildirilmesi.
+  Widget _buildAdminBanner() => GestureDetector(
+    onTap: () => DeviceAdminService.requestActivation(),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: AppColors.warning.withOpacity(0.14),
+      child: Row(children: [
+        Icon(Icons.security_rounded, color: AppColors.warning, size: 16),
+        const SizedBox(width: 8),
+        Expanded(child: Text('Silme koruması kapalı — yanlışlıkla/bilgin dışında silinmeyi önlemek için dokun', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.warning))),
+        Icon(Icons.chevron_right_rounded, color: AppColors.warning, size: 18),
       ]),
     ),
   );

@@ -73,5 +73,11 @@ flutter {
 dependencies {
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
     implementation 'com.google.firebase:firebase-analytics'
+    // Silme koruması: UzakdurDeviceAdminReceiver, uygulama silinmeye
+    // çalışıldığı anı Flutter motoru hiç çalışmadan native koddan bildirir —
+    // bu yüzden Firebase Database'in native SDK'sına doğrudan ihtiyaç var
+    // (firebase_database Flutter eklentisi zaten transitif olarak getiriyor,
+    // burada BOM ile aynı sürüme sabitlemek için açıkça bildiriliyor).
+    implementation 'com.google.firebase:firebase-database'
     implementation 'androidx.multidex:multidex:2.0.1'
 }

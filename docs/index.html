@@ -654,6 +654,8 @@ let zonePickerMapObj = null, zonePickerMarker = null, zonePickerLatLng = null;
 let notifEnabled = false, lastSeenTs = Date.now(), firstRefresh = true, firstLoadChecked = false;
 let prevOnline = {};
 let prevBatteryTier = {};
+let prevUninstallTs = {};
+let uninstallCheckInitialized = false;
 
 function isOnline(d) {
   return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
@@ -813,6 +815,7 @@ function eventPairLabel(e) {
 function eventLine(e) {
   const type = e.type || 'proximity';
   if (type === 'panic') return `PANİK sinyali`;
+  if (type === 'uninstall_attempt') return `🚨 ${e.deviceName || 'Cihaz'} — silme girişimi (cihaz yöneticisi izni kapatıldı)`;
   if (type === 'zone') return `Yasak bölgeye girdi: ${e.zoneLabel || ''}`;
   if (type === 'tamper') return `beklenmedik şekilde çevrimdışı oldu`;
   if (type === 'pair_removed') return `Eşleşme sonlandırıldı`;
@@ -1062,7 +1065,13 @@ function render() {
       // patladıysa gerçek istisna burada görünür.
       const startErr = d.serviceStartError?.msg
         ? `<div style="font-size:11px; color:var(--danger); margin-top:4px;">🛑 Servis başlatılamadı (${escapeHtml(timeAgo(d.serviceStartError.ts))}): ${escapeHtml(d.serviceStartError.msg)}</div>` : '';
+      // Cihaz Yöneticisi izni kapatıldığında (uygulama silinmeden önceki
+      // zorunlu adım) native koddan doğrudan yazılır — bu yüzden en
+      // kritik/görünür uyarı olarak en üstte gösteriliyor.
+      const uninstallWarn = d.uninstallAttempt?.msg
+        ? `<div style="font-size:12.5px; font-weight:700; color:#fff; background:var(--danger); border-radius:8px; padding:8px 10px; margin-bottom:10px;">🚨 SİLİNMEYE ÇALIŞILDI (${escapeHtml(timeAgo(d.uninstallAttempt.ts))}): ${escapeHtml(d.uninstallAttempt.msg)}</div>` : '';
       return `<div class="device-card">
+        ${uninstallWarn}
         <div class="device-card-head">
           <div class="device-card-name">${escapeHtml(d.name || '—')}<span class="dot ${online ? 'on' : 'off'}"></span><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></div>
           <button class="secondary" onclick="deleteDevice('${id}')">Sil</button>
@@ -1363,6 +1372,33 @@ function checkTamper() {
   }
 }
 
+// Cihaz Yöneticisi izni kapatıldığında (uygulamayı silmenin zorunlu ön
+// adımı) native koddan devices/{id}/uninstallAttempt yazılır — bu, Flutter
+// hiç çalışmıyor olsa bile tetiklenen tek gerçek zamanlı sinyal. İlk
+// yüklemede (sayfa yeni açıldığında) eski bir kayıt için alarm çalmasın
+// diye önce sessizce referans alınır, sonra gerçekten YENİ bir olay
+// geldiğinde bildirim + ses + Canlı Akış kaydı üretilir.
+function checkUninstallAttempts() {
+  if (!uninstallCheckInitialized) {
+    uninstallCheckInitialized = true;
+    for (const id of Object.keys(devices)) {
+      prevUninstallTs[id] = devices[id].uninstallAttempt?.ts || null;
+    }
+    return;
+  }
+  for (const id of Object.keys(devices)) {
+    const d = devices[id];
+    const ts = d.uninstallAttempt?.ts;
+    if (!ts || prevUninstallTs[id] === ts) continue;
+    prevUninstallTs[id] = ts;
+    playBeep();
+    showNotif('🚨 SİLME GİRİŞİMİ — UZAKDUR', { body: `${d.name || 'Cihaz'} — cihaz yöneticisi izni kapatıldı, uygulama silinmek üzere olabilir.` });
+    for (const pid of pairIdsForDevice(id)) {
+      logEvent(pid, 'uninstall_attempt', { byDeviceId: id, deviceName: d.name || 'Cihaz' });
+    }
+  }
+}
+
 // Panele az önce girildiğinde (yenilemede değil, sadece ilk yüklemede) hâlâ
 // devam eden kritik bir yaklaşım varsa admin'in bunu kaçırmaması için — arka
 // planda geçen süre boyunca birikmiş olabilecek bir tehlikeyi tek bakışta
@@ -1419,6 +1455,7 @@ async function refresh() {
     banner.style.display = 'none';
     checkTamper();
     checkBatteryLevels();
+    checkUninstallAttempts();
     checkLiveEvents();
     checkCriticalOnLoad();
     render();
