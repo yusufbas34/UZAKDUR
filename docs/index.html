@@ -1065,15 +1065,18 @@ function render() {
       // "at ..." satırı) — bunu olduğu gibi basmak kartı devasa, çirkin bir
       // kırmızı duvara çeviriyordu. Sadece ilk satırı (asıl hata) gösterip
       // tam metni title tooltip'ine koyuyoruz; yanındaki ✕ ile de manuel
-      // temizlenebiliyor (otomatik temizleme her senaryoyu yakalamayabilir —
-      // ör. eski bir build'den kalma kayıt).
-      const debugErr = d.debugError?.msg
+      // temizlenebiliyor. Ayrıca servis ŞU AN çalışıyorsa (serviceAlive) bu
+      // eski hata artık geçmişte kalmış demektir — sadece servis GERÇEKTEN
+      // durduğunda (DURMUŞ) gösterilir, aksi halde çalışan bir cihazda
+      // yanıltıcı/gereksiz kırmızı yazı olarak kalırdı.
+      const showOldErrors = !serviceAlive(d);
+      const debugErr = showOldErrors && d.debugError?.msg
         ? `<div class="err-line">⚠ Telefondan hata raporu (${escapeHtml(timeAgo(d.debugError.ts))}): <span class="err-msg" title="${escapeHtml(d.debugError.msg)}">${escapeHtml(truncateErrMsg(d.debugError.msg))}</span><a href="javascript:void(0)" class="err-dismiss" onclick="clearDeviceField('${id}','debugError')" title="Kaldır">✕</a></div>` : '';
       // debugError, servis TİKLEDİKTEN sonraki (mesaj/konum işleme) hataları
       // yakalar — servis hiç BAŞLAYAMAMIŞSA bu hiç yazılmaz. serviceStartError
       // tam olarak o boşluğu kapatıyor: servisi başlatma çağrısının kendisi
       // patladıysa gerçek istisna burada görünür.
-      const startErr = d.serviceStartError?.msg
+      const startErr = showOldErrors && d.serviceStartError?.msg
         ? `<div class="err-line">🛑 Servis başlatılamadı (${escapeHtml(timeAgo(d.serviceStartError.ts))}): <span class="err-msg" title="${escapeHtml(d.serviceStartError.msg)}">${escapeHtml(truncateErrMsg(d.serviceStartError.msg))}</span><a href="javascript:void(0)" class="err-dismiss" onclick="clearDeviceField('${id}','serviceStartError')" title="Kaldır">✕</a></div>` : '';
       // Cihaz Yöneticisi izni kapatıldığında (uygulama silinmeden önceki
       // zorunlu adım) native koddan doğrudan yazılır — bu yüzden en
