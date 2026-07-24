@@ -151,24 +151,41 @@ class _ProximityHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, SendPort? sendPort) async {
-    // KÖK SEBEP: flutter_foreground_task bu callback'i ayrı bir Dart
-    // isolate'inde çalıştırır — bu isolate'in Firebase'i main.dart'taki
-    // Firebase.initializeApp() çağrısından HABERİ YOK, kendi başına ayrıca
-    // initialize edilmesi gerekiyor. Bu satır olmadan bu isolate içindeki
-    // HER FirebaseDatabase çağrısı (serviceTick, heartbeat, adminMsg,
-    // locationRequest, hatta debugError'ın kendisi) "no Firebase App
-    // [DEFAULT]" hatasıyla patlıyordu — ve hepsi try/catch(_){}  içinde
-    // sessizce yutuluyordu. Bu, "servis hiç tick atmıyor" teşhisinin asıl
-    // sebebiydi: servis aslında BAŞLIYORDU, ama içindeki her Firebase
-    // işlemi ilk satırda sessizce başarısız oluyordu — OEM pil kısıtlaması
-    // hiç devreye girmeden.
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    // flutter_local_notifications'ın da aynı sebeple bu isolate'te kendi
-    // initialize()'ı gerekiyor (Android bildirim kanalı OS seviyesinde
-    // kalıcı olsa da, eklentinin Dart-native köprüsü isolate başına ayrı).
-    await NotificationService.init();
+    // getData yerel/native bir çağrı, Firebase'e bağımlı değil — bu yüzden
+    // aşağıdaki adımlardan biri patlarsa bile hatayı YİNE DE hangi cihaz
+    // için raporlayacağımızı bilebilelim diye en başta alınıyor.
     _deviceId = await FlutterForegroundTask.getData<String>(key: 'deviceId') ?? '';
-    await _pollLocation();
+    try {
+      // KÖK SEBEP: flutter_foreground_task bu callback'i ayrı bir Dart
+      // isolate'inde çalıştırır — bu isolate'in Firebase'i main.dart'taki
+      // Firebase.initializeApp() çağrısından HABERİ YOK, kendi başına ayrıca
+      // initialize edilmesi gerekiyor. Bu satır olmadan bu isolate içindeki
+      // HER FirebaseDatabase çağrısı (serviceTick, heartbeat, adminMsg,
+      // locationRequest, hatta debugError'ın kendisi) "no Firebase App
+      // [DEFAULT]" hatasıyla patlıyordu — ve hepsi try/catch(_){}  içinde
+      // sessizce yutuluyordu. Bu, "servis hiç tick atmıyor" teşhisinin asıl
+      // sebebiydi: servis aslında BAŞLIYORDU, ama içindeki her Firebase
+      // işlemi ilk satırda sessizce başarısız oluyordu — OEM pil kısıtlaması
+      // hiç devreye girmeden.
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      // flutter_local_notifications'ın da aynı sebeple bu isolate'te kendi
+      // initialize()'ı gerekiyor (Android bildirim kanalı OS seviyesinde
+      // kalıcı olsa da, eklentinin Dart-native köprüsü isolate başına ayrı).
+      await NotificationService.init();
+      await _pollLocation();
+    } catch (e) {
+      // onStart() eskiden hiçbir try/catch olmadan çalışıyordu — burada
+      // atılan bir istisna (ör. Firebase "duplicate app" hatası) muhtemelen
+      // eklentinin kendi isolate giriş noktası tarafından sessizce
+      // yutuluyordu ve onRepeatEvent hiç çalışmaya başlamıyordu, hiçbir yerde
+      // görünmeden. Artık en azından denemesi mümkünse Firebase'e yazılıyor.
+      if (_deviceId.isNotEmpty) {
+        try {
+          await FirebaseDatabase.instance.ref('devices/$_deviceId/serviceStartError')
+              .set({'msg': 'onStart: $e', 'ts': ServerValue.timestamp});
+        } catch (_) {}
+      }
+    }
   }
 
   // Arka planda GPS'i sürekli açık tutmak (stream) en çok pil tüketen ve

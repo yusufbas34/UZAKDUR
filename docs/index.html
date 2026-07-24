@@ -581,8 +581,17 @@ function logEvent(pairId, type, extra) {
   return pushJSON(`alarm_log/${pairId}`, Object.assign({ byDeviceId: 'admin', distance: 0, type, ts: Date.now() }, extra || {}));
 }
 
+// Bir yerlerde 'undefined'/boş bir deviceId ile çağrılırsa, patchJSON bunu
+// gerçek bir cihazmış gibi devices/undefined altında YENİ bir düğüm olarak
+// yazıp admin panelde hayalet bir "cihaz" kartı oluşturuyordu — bunu daha
+// kaynağında kesiyoruz.
+function isValidDeviceId(id) {
+  return !!id && id !== 'undefined' && id !== 'null';
+}
+
 let msgTargetDeviceId = null;
 function openMsgModal(deviceId, deviceName) {
+  if (!isValidDeviceId(deviceId)) return;
   msgTargetDeviceId = deviceId;
   document.getElementById('msgTargetLabel').textContent = 'Alıcı: ' + (deviceName || '—');
   document.getElementById('msgTemplate').value = '';
@@ -603,7 +612,7 @@ function applyMsgTemplate() {
 async function sendAdminMsg() {
   const text = document.getElementById('msgText').value.trim();
   const statusEl = document.getElementById('msgStatus');
-  if (!msgTargetDeviceId) return;
+  if (!isValidDeviceId(msgTargetDeviceId)) return;
   if (!text) { statusEl.textContent = 'Önce bir mesaj yaz veya seç.'; return; }
   statusEl.textContent = 'Gönderiliyor…';
   try {
@@ -625,6 +634,7 @@ async function sendAdminMsg() {
 // kapanmış/öldürülmüş olsa bile OS'u uyandırıp konum almayı dener (garantili
 // değil, OEM pil yönetimi engelleyebilir, ama tek gerçek uyandırma yolu budur).
 async function requestLocationNow(deviceId) {
+  if (!isValidDeviceId(deviceId)) return;
   try {
     await patchJSON(`devices/${deviceId}/locationRequest`, { ts: { '.sv': 'timestamp' } });
   } catch (e) {
