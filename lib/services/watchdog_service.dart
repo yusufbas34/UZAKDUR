@@ -27,6 +27,12 @@ void watchdogCallbackDispatcher() {
       // serviceStartError teşhis kaydının çalışabilmesi için Firebase bu
       // isolate'te de initialize edilmiş olmalı.
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      // flutter_foreground_task da isolate başına: FlutterForegroundTask.init()
+      // çağrılmadan isRunningService/start() kullanmak "Not initialized"
+      // hatasıyla sessizce başarısız oluyordu — WorkManager'ın kendi izole
+      // isolate'inde bu hiç çağrılmıyordu. isRunningService kontrolünden
+      // ÖNCE çağrılmalı, o da bu init'e bağımlı.
+      ForegroundTaskService.init();
       final prefs = await SharedPreferences.getInstance();
       final deviceId = prefs.getString('device_id');
       final role = prefs.getString('device_role');
