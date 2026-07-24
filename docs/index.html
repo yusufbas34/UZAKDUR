@@ -236,6 +236,10 @@
   .device-meta { font-size:11px; color:var(--text2); display:flex; gap:10px; flex-wrap:wrap; }
   .device-meta .batt.low { font-weight:700; }
   .device-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .err-line { font-size:11px; color:var(--danger); margin-top:6px; display:flex; align-items:baseline; gap:6px; }
+  .err-msg { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1; cursor:help; }
+  .err-dismiss { flex-shrink:0; color:var(--text2); text-decoration:none; padding:0 4px; }
+  .err-dismiss:hover { color:var(--danger); }
   .action-btn {
     display:inline-flex; align-items:center; gap:5px; padding:7px 10px; border-radius:9px;
     background:var(--surface); border:1px solid var(--border); color:var(--text2);
@@ -1057,14 +1061,20 @@ function render() {
       const nameSafe = escapeHtml(d.name || '').replace(/'/g, "\\'");
       const callBtn = (d.battery <= 30 && d.phone)
         ? `<a href="tel:${escapeHtml(d.phone)}" class="action-btn" title="${escapeHtml(d.phone)}">📞 Ara</a>` : '';
+      // Native istisna mesajları tam Java stack trace'iyle geliyor (onlarca
+      // "at ..." satırı) — bunu olduğu gibi basmak kartı devasa, çirkin bir
+      // kırmızı duvara çeviriyordu. Sadece ilk satırı (asıl hata) gösterip
+      // tam metni title tooltip'ine koyuyoruz; yanındaki ✕ ile de manuel
+      // temizlenebiliyor (otomatik temizleme her senaryoyu yakalamayabilir —
+      // ör. eski bir build'den kalma kayıt).
       const debugErr = d.debugError?.msg
-        ? `<div style="font-size:11px; color:var(--danger); margin-top:8px;">⚠ Telefondan hata raporu (${escapeHtml(timeAgo(d.debugError.ts))}): ${escapeHtml(d.debugError.msg)}</div>` : '';
+        ? `<div class="err-line">⚠ Telefondan hata raporu (${escapeHtml(timeAgo(d.debugError.ts))}): <span class="err-msg" title="${escapeHtml(d.debugError.msg)}">${escapeHtml(truncateErrMsg(d.debugError.msg))}</span><a href="javascript:void(0)" class="err-dismiss" onclick="clearDeviceField('${id}','debugError')" title="Kaldır">✕</a></div>` : '';
       // debugError, servis TİKLEDİKTEN sonraki (mesaj/konum işleme) hataları
       // yakalar — servis hiç BAŞLAYAMAMIŞSA bu hiç yazılmaz. serviceStartError
       // tam olarak o boşluğu kapatıyor: servisi başlatma çağrısının kendisi
       // patladıysa gerçek istisna burada görünür.
       const startErr = d.serviceStartError?.msg
-        ? `<div style="font-size:11px; color:var(--danger); margin-top:4px;">🛑 Servis başlatılamadı (${escapeHtml(timeAgo(d.serviceStartError.ts))}): ${escapeHtml(d.serviceStartError.msg)}</div>` : '';
+        ? `<div class="err-line">🛑 Servis başlatılamadı (${escapeHtml(timeAgo(d.serviceStartError.ts))}): <span class="err-msg" title="${escapeHtml(d.serviceStartError.msg)}">${escapeHtml(truncateErrMsg(d.serviceStartError.msg))}</span><a href="javascript:void(0)" class="err-dismiss" onclick="clearDeviceField('${id}','serviceStartError')" title="Kaldır">✕</a></div>` : '';
       // Cihaz Yöneticisi izni kapatıldığında (uygulama silinmeden önceki
       // zorunlu adım) native koddan doğrudan yazılır — bu yüzden en
       // kritik/görünür uyarı olarak en üstte gösteriliyor.
@@ -1243,6 +1253,16 @@ function renderContactRequestsGlobal() {
         </div>`;
       }).join('')
     : '<div class="empty">Bekleyen talep yok.</div>';
+}
+
+function truncateErrMsg(msg, max = 160) {
+  const firstLine = msg.split(' at ')[0].split('\n')[0];
+  return firstLine.length > max ? firstLine.slice(0, max) + '…' : firstLine;
+}
+
+async function clearDeviceField(deviceId, field) {
+  await deletePath(`devices/${deviceId}/${field}`);
+  await refresh();
 }
 
 async function deleteDevice(deviceId) {
