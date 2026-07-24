@@ -13,6 +13,10 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Panel tamamen kapalıyken de bildirim alabilmek için (bkz. sw.js'teki
+     arka plan işleyici + enableNotifications()'daki token kaydı). -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
 <style>
   :root {
     --bg: #0B0E14;
@@ -528,6 +532,21 @@ const ADMIN_PASSWORD = 'uzakdur2026'; // İstersen bu satırı değiştirip kend
 // Boş bırakılırsa bu adım sessizce atlanır, buton yine de RTDB bayrağını
 // yazar (yalnızca servis zaten çalışıyorsa işe yarar).
 const APPS_SCRIPT_WAKE_URL = 'https://script.google.com/macros/s/AKfycbz7Fx1gXAcNhI3D6UuN2CdKSXdetYP_A5MbPi_85neUb9KH_4ZX0L0TjQrwpaFI3Iam9g/exec';
+
+// Panel tamamen kapalıyken (sekme/tarayıcı kapalı) de bildirim alabilmek
+// için: bu config sw.js'teki ile aynı olmalı (orada da elle yazılı, çünkü
+// service worker bu <script> bloğunu import edemiyor).
+const FIREBASE_WEB_CONFIG = {
+  apiKey: 'AIzaSyCy-CSxZGg4AJb_nNZlSLvQ2-56v7ETg2I',
+  authDomain: 'uyari-f25c4.firebaseapp.com',
+  databaseURL: DB_URL,
+  projectId: 'uyari-f25c4',
+  storageBucket: 'uyari-f25c4.firebasestorage.app',
+  messagingSenderId: '93986217590',
+  appId: '1:93986217590:web:d5c1b676b09599ed92c957',
+};
+const FIREBASE_VAPID_KEY = 'BKCE7MGdSD1DN-XwARFPiT4rOm6M-jADqNbE1lLKsfD0pG83g8NEPhsPAf3uuj7eZ2oBjQbdXbGF5jaf4L0kfqw';
+firebase.initializeApp(FIREBASE_WEB_CONFIG);
 
 const ROLE_LABEL = { protected: 'Korunan', tracked: 'Uzaklaştırılan' };
 const EVENT_LABEL = { proximity: 'Yaklaşma', zone: 'Yasak bölge', panic: 'PANİK', tamper: 'Şüpheli çevrimdışı' };
@@ -1320,11 +1339,32 @@ function showNotif(title, opts) {
 
 function enableNotifications() {
   if (!('Notification' in window)) { alert('Bu tarayıcı bildirimleri desteklemiyor.'); return; }
-  Notification.requestPermission().then(p => {
+  Notification.requestPermission().then(async p => {
     notifEnabled = p === 'granted';
     document.getElementById('notifBtn').textContent = notifEnabled ? '🔔 Bildirimler Açık' : '🔕 İzin verilmedi';
-    if (notifEnabled) showNotif('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
+    if (notifEnabled) {
+      showNotif('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
+      await registerPushToken();
+    }
   });
+}
+
+// Sekme/tarayıcı tamamen kapalıyken de bildirim alabilmek için: yukarıdaki
+// showNotif() sadece sayfa açıkken çalışır (poll döngüsü onu tetikliyor).
+// Bu token, telefon tarafında gerçek bir alarm/silme girişimi olduğunda
+// (Apps Script üzerinden) doğrudan bu tarayıcıya push göndermek için
+// kaydediliyor — panel kapalı olsa bile service worker (sw.js) bunu alıp
+// bildirim gösterebilir.
+async function registerPushToken() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const messaging = firebase.messaging();
+    const token = await messaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) return;
+    await pushJSON('adminPushTokens', { token, ts: { '.sv': 'timestamp' }, ua: navigator.userAgent.slice(0, 120) });
+  } catch (e) {
+    console.warn('Push token kaydedilemedi:', e);
+  }
 }
 
 let audioCtx = null;
