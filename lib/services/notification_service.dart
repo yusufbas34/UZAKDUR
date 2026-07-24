@@ -132,6 +132,25 @@ class NotificationService {
     }
   }
 
+  // Korunan kişinin düzenli kullandığı bir güzergaha (rota bölgesi)
+  // yaklaşıldığında — sadece kritik/sınır kademesi, asla tam alarm değil
+  // (konum zaten açık olduğu için gerçek bir yaklaşma normal eşik sistemini
+  // zaten tetikler; bu sadece isimli güzergaha özel erken bir uyarı).
+  static Future<void> showRouteProximityNotice(String routeLabel, {required bool critical}) async {
+    await _plugin.show(
+      109,
+      critical ? '⚠️ Güzergaha Hızla Yaklaşılıyor' : '🔶 Güzergaha Yaklaşılıyor',
+      '"$routeLabel" güzergahına yaklaşıyorsunuz.',
+      const NotificationDetails(android: AndroidNotificationDetails(
+        'uzakdur_caution', 'UZAKDUR Yaklaşma Uyarısı',
+        importance: Importance.high, priority: Priority.high,
+      )),
+    );
+    if (await Vibration.hasVibrator() ?? false) {
+      Vibration.vibrate(pattern: critical ? [0, 250, 150, 250] : [0, 150]);
+    }
+  }
+
   static Future<void> showBatteryWarning(int level, {required bool critical}) async {
     await _plugin.show(
       critical ? 103 : 102,

@@ -40,21 +40,107 @@ class LocationData {
       );
 }
 
+class RoutePoint {
+  final double lat;
+  final double lon;
+  const RoutePoint(this.lat, this.lon);
+}
+
+// Yasak bölgeler iki şekilde olabilir: 'circle' (nokta + yarıçap, mevcut —
+// tam alarm tetikler) ya da 'route' (korunan kişinin düzenli kullandığı bir
+// güzergah, çoklu nokta + koridor genişliği — sadece kademeli kritik/sınır
+// uyarısı verir, asla tam alarm tetiklemez; bkz. monitor_screen.dart).
 class ZoneData {
   final String id;
   final String label;
+  final String type; // 'circle' | 'route'
   final double lat;
   final double lon;
   final double radius;
-  const ZoneData({required this.id, required this.label, required this.lat, required this.lon, required this.radius});
+  final List<RoutePoint> points;
+  final double width;
+  const ZoneData({
+    required this.id,
+    required this.label,
+    this.type = 'circle',
+    this.lat = 0,
+    this.lon = 0,
+    this.radius = 0,
+    this.points = const [],
+    this.width = 0,
+  });
 
-  factory ZoneData.fromMap(String id, Map<dynamic, dynamic> map) => ZoneData(
+  factory ZoneData.fromMap(String id, Map<dynamic, dynamic> map) {
+    final type = (map['type'] as String?) ?? 'circle';
+    if (type == 'route') {
+      final rawPoints = map['points'];
+      final points = <RoutePoint>[];
+      if (rawPoints is List) {
+        for (final p in rawPoints) {
+          if (p is Map) {
+            try {
+              points.add(RoutePoint((p['lat'] as num).toDouble(), (p['lon'] as num).toDouble()));
+            } catch (_) {}
+          }
+        }
+      }
+      return ZoneData(
         id: id,
-        label: (map['label'] as String?) ?? 'Bölge',
-        lat: (map['lat'] as num).toDouble(),
-        lon: (map['lon'] as num).toDouble(),
-        radius: ((map['radius'] as num?) ?? 100).toDouble(),
+        label: (map['label'] as String?) ?? 'Yol',
+        type: 'route',
+        points: points,
+        width: ((map['width'] as num?) ?? 80).toDouble(),
       );
+    }
+    return ZoneData(
+      id: id,
+      label: (map['label'] as String?) ?? 'Bölge',
+      lat: (map['lat'] as num).toDouble(),
+      lon: (map['lon'] as num).toDouble(),
+      radius: ((map['radius'] as num?) ?? 100).toDouble(),
+    );
+  }
+
+  // Bir konumun bu bölgeye olan mesafesi: daire için merkeze, rota için en
+  // yakın segmente olan dik mesafedir.
+  double distanceFrom(double lat2, double lon2) {
+    if (type == 'route') return _minDistanceToRoute(lat2, lon2, points);
+    return LocationService.calculateDistance(lat2, lon2, lat, lon);
+  }
+
+  // Daire için yarıçap, rota için koridor genişliği — ikisi de "bu mesafenin
+  // altına girilince bölgeye girilmiş sayılır" eşiğidir.
+  double get threshold => type == 'route' ? width : radius;
+}
+
+double _minDistanceToRoute(double lat, double lon, List<RoutePoint> points) {
+  if (points.isEmpty) return double.infinity;
+  if (points.length == 1) return LocationService.calculateDistance(lat, lon, points[0].lat, points[0].lon);
+  double best = double.infinity;
+  for (var i = 0; i < points.length - 1; i++) {
+    final d = _distanceToSegment(lat, lon, points[i], points[i + 1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+// Koridor genişliği ölçeğinde (onlarca-yüzlerce metre) haversine yerine
+// basit yerel düzlemsel izdüşüm kullanılıyor — bu mesafede fark ihmal
+// edilebilir düzeyde ama hesap çok daha basit (nokta-segment dik mesafe
+// formülü küresel koordinatlarda yok).
+double _distanceToSegment(double lat, double lon, RoutePoint a, RoutePoint b) {
+  final mPerDegLat = 110540.0;
+  final mPerDegLon = 111320.0 * cos(a.lat * pi / 180);
+  final ax = 0.0, ay = 0.0;
+  final bx = (b.lon - a.lon) * mPerDegLon, by = (b.lat - a.lat) * mPerDegLat;
+  final px = (lon - a.lon) * mPerDegLon, py = (lat - a.lat) * mPerDegLat;
+  final abx = bx - ax, aby = by - ay;
+  final len2 = abx * abx + aby * aby;
+  var t = len2 > 0 ? ((px - ax) * abx + (py - ay) * aby) / len2 : 0.0;
+  t = t.clamp(0.0, 1.0);
+  final cx = ax + t * abx, cy = ay + t * aby;
+  final dx = px - cx, dy = py - cy;
+  return sqrt(dx * dx + dy * dy);
 }
 
 class EmergencyContact {

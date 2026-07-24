@@ -18,6 +18,7 @@ class _ProximityHandler extends TaskHandler {
   String _deviceId = '';
   bool _alarming = false;
   String _lastTier = 'safe'; // 'safe' | 'sinir' | 'kritik' — bir önceki tam kontroldeki en kötü kademe (acil hariç)
+  String _lastRouteTier = 'safe'; // aynı, ama rota (güzergah) bölgeleri için — asla 'acil' olmaz
   bool _startErrorCleared = false;
   int _tick = 0;
   final _battery = Battery();
@@ -46,9 +47,9 @@ class _ProximityHandler extends TaskHandler {
     }
     double? minRatio;
     for (final z in _cachedZones) {
-      if (z.radius <= 0) continue;
-      final d = LocationService.calculateDistance(_myLat!, _myLon!, z.lat, z.lon);
-      final ratio = d / z.radius;
+      if (z.threshold <= 0) continue;
+      final d = z.distanceFrom(_myLat!, _myLon!);
+      final ratio = d / z.threshold;
       if (minRatio == null || ratio < minRatio) minRatio = ratio;
     }
     _lastZoneRatio = minRatio;
@@ -270,6 +271,14 @@ class _ProximityHandler extends TaskHandler {
       // alarm), %50-%80 arası KRİTİK, %80-%100 arası SINIR (yeni girildi).
       // Birden fazla eşleşme varsa en kötü (en yakın) kademe esas alınır.
       String worstTier = 'safe';
+      String? worstTierPairId;
+      double? worstTierDistance;
+      // Rota (güzergah) bölgeleri sadece kademeli kritik/sınır uyarısı verir,
+      // asla tam alarm tetiklemez.
+      String worstRouteTier = 'safe';
+      String? worstRouteLabel;
+      double? worstRouteDistance;
+      String? worstRoutePairId;
       double? minRatio;
       final zonesSeen = <ZoneData>[];
 
@@ -297,8 +306,22 @@ class _ProximityHandler extends TaskHandler {
           }
           zonesSeen.addAll(pairZones);
           for (final z in pairZones) {
-            final zd = LocationService.calculateDistance(_myLat!, _myLon!, z.lat, z.lon);
-            if (zd < z.radius) { breachedZone = z; break; }
+            final zd = z.distanceFrom(_myLat!, _myLon!);
+            if (z.type == 'route') {
+              if (z.threshold <= 0) continue;
+              final ratio = zd / z.threshold;
+              String rTier = 'safe';
+              if (ratio <= kKritikRatio) rTier = 'kritik';
+              else if (ratio <= 1.0) rTier = 'sinir';
+              if (rTier == 'kritik' && worstRouteTier != 'kritik') {
+                worstRouteTier = 'kritik'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pairId;
+              }
+              if (rTier == 'sinir' && worstRouteTier == 'safe') {
+                worstRouteTier = 'sinir'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pairId;
+              }
+              continue;
+            }
+            if (zd < z.threshold) { breachedZone = z; break; }
           }
         }
 
@@ -324,8 +347,8 @@ class _ProximityHandler extends TaskHandler {
             else if (ratio <= 1.0) tier = 'sinir';
           }
         }
-        if (tier == 'kritik' && worstTier != 'kritik') worstTier = 'kritik';
-        if (tier == 'sinir' && worstTier == 'safe') worstTier = 'sinir';
+        if (tier == 'kritik' && worstTier != 'kritik') { worstTier = 'kritik'; worstTierPairId = pairId; worstTierDistance = d; }
+        if (tier == 'sinir' && worstTier == 'safe') { worstTier = 'sinir'; worstTierPairId = pairId; worstTierDistance = d; }
 
         final isAlarm = proximityAlarm || breachedZone != null;
 
@@ -353,6 +376,7 @@ class _ProximityHandler extends TaskHandler {
           await NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
         }
         _lastTier = 'safe';
+        _lastRouteTier = 'safe';
         FlutterForegroundTask.updateService(
           notificationTitle: alarmZone != null ? '⚠️ YASAK BÖLGE — ${alarmZone.label}' : '⚠️ YAKLAŞMA — ${alarmDistance?.round()}m',
           notificationText: 'Aktif alarm',
@@ -368,8 +392,21 @@ class _ProximityHandler extends TaskHandler {
           } else {
             await NotificationService.showBoundaryEnteredNotice();
           }
+          if (worstTierPairId != null) {
+            await LocationService.writeAlarmLog(worstTierPairId, _deviceId, worstTierDistance ?? 0, type: worstTier);
+          }
         }
         _lastTier = worstTier;
+
+        if (role == 'tracked' && worstRouteTier != _lastRouteTier && worstRouteTier != 'safe') {
+          await NotificationService.showRouteProximityNotice(worstRouteLabel ?? 'Yol', critical: worstRouteTier == 'kritik');
+          if (worstRoutePairId != null) {
+            await LocationService.writeAlarmLog(worstRoutePairId, _deviceId, worstRouteDistance ?? 0,
+                type: worstRouteTier, zoneLabel: worstRouteLabel);
+          }
+        }
+        _lastRouteTier = worstRouteTier;
+
         FlutterForegroundTask.updateService(
           notificationTitle: alarmDistance != null ? 'UZAKDUR — Güvenli (${alarmDistance.round()}m)' : 'UZAKDUR — İzleniyor',
           notificationText: 'İzleniyor',

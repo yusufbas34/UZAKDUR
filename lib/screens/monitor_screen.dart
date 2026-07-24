@@ -73,6 +73,7 @@ class _MonitorScreenState extends State<MonitorScreen>
   double? _distance;
   bool _isAlarm = false, _isRunning = false;
   String _lastTier = 'safe'; // 'safe' | 'sinir' | 'kritik' — bir önceki tick'teki en kötü kademe (acil hariç)
+  String _lastRouteTier = 'safe'; // aynı, ama rota (güzergah) bölgeleri için — asla 'acil' olmaz
   String _statusText = 'GPS bekleniyor…';
   String? _alarmZoneLabel;
   String? _errorText;
@@ -381,6 +382,7 @@ class _MonitorScreenState extends State<MonitorScreen>
         NotificationService.stopAlarm();
       }
       _lastTier = 'safe';
+      _lastRouteTier = 'safe';
       if (!mounted) return;
       setState(() {
         _isAlarm = false;
@@ -399,6 +401,15 @@ class _MonitorScreenState extends State<MonitorScreen>
     // alarm), %50-%80 arası KRİTİK, %80-%100 arası SINIR (yeni girildi).
     // Birden fazla eşleşme varsa en kötü (en yakın) kademe esas alınır.
     String worstTier = 'safe';
+    String? worstTierPairId;
+    double? worstTierDistance;
+    // Rota (güzergah) bölgeleri sadece kademeli kritik/sınır uyarısı verir,
+    // asla tam alarm tetiklemez — konum zaten açık olduğu için gerçekten
+    // yaklaşılırsa normal eşik sistemi zaten devreye girer.
+    String worstRouteTier = 'safe';
+    String? worstRouteLabel;
+    double? worstRouteDistance;
+    String? worstRoutePairId;
     final newStatus = <String, String>{};
 
     for (final entry in _pairs.entries) {
@@ -409,8 +420,22 @@ class _MonitorScreenState extends State<MonitorScreen>
       ZoneData? zone;
       if (!_isProtected && _myLocation != null) {
         for (final z in (_zonesByPair[pid] ?? const <ZoneData>[])) {
-          final d = LocationService.calculateDistance(_myLocation!.lat, _myLocation!.lon, z.lat, z.lon);
-          if (d < z.radius) { zone = z; break; }
+          final zd = z.distanceFrom(_myLocation!.lat, _myLocation!.lon);
+          if (z.type == 'route') {
+            if (z.threshold <= 0) continue;
+            final ratio = zd / z.threshold;
+            String rTier = 'safe';
+            if (ratio <= kKritikRatio) rTier = 'kritik';
+            else if (ratio <= 1.0) rTier = 'sinir';
+            if (rTier == 'kritik' && worstRouteTier != 'kritik') {
+              worstRouteTier = 'kritik'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pid;
+            }
+            if (rTier == 'sinir' && worstRouteTier == 'safe') {
+              worstRouteTier = 'sinir'; worstRouteLabel = z.label; worstRouteDistance = zd; worstRoutePairId = pid;
+            }
+            continue; // rota bölgeleri bu döngüde tam alarm adayı olamaz
+          }
+          if (zd < z.threshold) { zone = z; break; }
         }
       }
 
@@ -426,8 +451,8 @@ class _MonitorScreenState extends State<MonitorScreen>
           else if (ratio <= 1.0) tier = 'sinir';
         }
       }
-      if (tier == 'kritik' && worstTier != 'kritik') worstTier = 'kritik';
-      if (tier == 'sinir' && worstTier == 'safe') worstTier = 'sinir';
+      if (tier == 'kritik' && worstTier != 'kritik') { worstTier = 'kritik'; worstTierPairId = pid; worstTierDistance = d; }
+      if (tier == 'sinir' && worstTier == 'safe') { worstTier = 'sinir'; worstTierPairId = pid; worstTierDistance = d; }
 
       final isAlarm = proximityAlarm || zone != null;
       newStatus[pid] = isAlarm ? 'acil' : (tier != 'safe' ? tier : (d != null ? 'safe' : 'unknown'));
@@ -483,6 +508,7 @@ class _MonitorScreenState extends State<MonitorScreen>
       if (!_alarmCtrl.isAnimating) _alarmCtrl.repeat(reverse: true);
       NotificationService.startAlarm(alarmDistance ?? 0, soundId: alarmSoundId ?? 'siren');
       _lastTier = 'safe';
+      _lastRouteTier = 'safe';
     } else {
       _alarmCtrl.stop(); _alarmCtrl.reset();
       NotificationService.stopAlarm();
@@ -501,9 +527,25 @@ class _MonitorScreenState extends State<MonitorScreen>
           } else {
             NotificationService.showBoundaryEnteredNotice();
           }
+          // Kademe geçişleri de kaydedilir ki Canlı Akış'ta görünsün ve
+          // yönetici hangi kademelerin acil durum kişilerine mail
+          // attıracağını ayrıca seçebilsin (bkz. admin panel e-posta ayarları).
+          if (worstTierPairId != null) {
+            LocationService.writeAlarmLog(worstTierPairId, widget.deviceId, worstTierDistance ?? 0, type: worstTier);
+          }
         }
       }
       _lastTier = worstTier;
+
+      if (!_isProtected && worstRouteTier != _lastRouteTier && worstRouteTier != 'safe') {
+        HapticFeedback.selectionClick();
+        NotificationService.showRouteProximityNotice(worstRouteLabel ?? 'Yol', critical: worstRouteTier == 'kritik');
+        if (worstRoutePairId != null) {
+          LocationService.writeAlarmLog(worstRoutePairId, widget.deviceId, worstRouteDistance ?? 0,
+              type: worstRouteTier, zoneLabel: worstRouteLabel);
+        }
+      }
+      _lastRouteTier = worstRouteTier;
     }
     _updateMap();
   }
@@ -611,6 +653,26 @@ class _MonitorScreenState extends State<MonitorScreen>
     if (_focusedPairId != null) {
       final zones = _zonesByPair[_focusedPairId] ?? const <ZoneData>[];
       for (final z in zones) {
+        if (z.type == 'route') {
+          if (z.points.length < 2) continue;
+          // Rota koridoru sadece kademeli uyarı verdiği için (bkz.
+          // _checkDistance) turuncu yerine mavi/uyarı rengiyle, kesikli
+          // çizgi olarak gösteriliyor — yasak bölgelerden (tam alarm)
+          // görsel olarak ayrışsın diye.
+          polylines.add(Polyline(
+            polylineId: PolylineId('route_${z.id}'),
+            points: z.points.map((p) => LatLng(p.lat, p.lon)).toList(),
+            color: AppColors.roleB.withOpacity(0.55),
+            width: 5, patterns: [PatternItem.dash(14), PatternItem.gap(8)],
+          ));
+          final mid = z.points[z.points.length ~/ 2];
+          markers.add(Marker(
+            markerId: MarkerId('route_${z.id}'), position: LatLng(mid.lat, mid.lon),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            infoWindow: InfoWindow(title: '🛣️ ${z.label}'), zIndex: 0,
+          ));
+          continue;
+        }
         final center = LatLng(z.lat, z.lon);
         circles.add(Circle(
           circleId: CircleId('zone_${z.id}'), center: center, radius: z.radius,
