@@ -82,6 +82,8 @@ class _MonitorScreenState extends State<MonitorScreen>
   // null: henüz kontrol edilmedi (banner o ana kadar gösterilmez, aksi
   // halde her açılışta bir an için yanlışlıkla "kapalı" görünürdü).
   bool? _adminProtectionActive;
+  bool? _batteryOptOn; // true: OS hâlâ pil kısıtlaması uyguluyor (kötü)
+  int _bottomTab = 0;
   final List<LogEntry> _log = [];
   final _fmt = DateFormat('HH:mm:ss');
   final _battery = Battery();
@@ -121,6 +123,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     WidgetsBinding.instance.addObserver(this);
     ForegroundTaskService.init();
     _checkNotifPermission();
+    _checkBatteryOpt();
     _start();
     if (!_isProtected) {
       // Silme koruması sadece uzaklaştırılan tarafta anlamlı — korunan
@@ -154,6 +157,14 @@ class _MonitorScreenState extends State<MonitorScreen>
     final active = await DeviceAdminService.isActive();
     if (!mounted) return;
     setState(() => _adminProtectionActive = active);
+  }
+
+  // Pil kısıtlaması hem korunan hem uzaklaştırılan tarafta arka plan
+  // servisini etkiliyor — bu yüzden role bakılmaksızın kontrol ediliyor.
+  Future<void> _checkBatteryOpt() async {
+    final status = await Permission.ignoreBatteryOptimizations.status;
+    if (!mounted) return;
+    setState(() => _batteryOptOn = !status.isGranted);
   }
 
   Future<void> _loadDisguiseState() async {
@@ -781,6 +792,7 @@ class _MonitorScreenState extends State<MonitorScreen>
     if (state == AppLifecycleState.detached) _stop();
     if (state == AppLifecycleState.resumed) {
       _checkNotifPermission();
+      _checkBatteryOpt();
       _ensureForegroundServiceAlive();
       // Kullanıcı Ayarlar'a gidip izni açıp/kapatıp geri dönmüş olabilir.
       if (!_isProtected) _checkDeviceAdmin();
@@ -832,6 +844,11 @@ class _MonitorScreenState extends State<MonitorScreen>
     }
   }
 
+  int get _permIssueCount =>
+      (_notifDenied ? 1 : 0) +
+      (_batteryOptOn == true ? 1 : 0) +
+      (!_isProtected && _adminProtectionActive == false ? 1 : 0);
+
   @override
   Widget build(BuildContext context) {
     return WithForegroundTask(
@@ -847,21 +864,164 @@ class _MonitorScreenState extends State<MonitorScreen>
             ),
             child: SafeArea(child: Column(children: [
               _buildTopBar(),
-              if (_notifDenied) _buildNotifBanner(),
-              if (!_isProtected && _adminProtectionActive == false) _buildAdminBanner(),
-              if (_updateInfo != null) _buildUpdateBanner(),
-              if (_pairs.isNotEmpty) _buildPartnerStrip(),
-              Expanded(child: _errorText != null
-                  ? _buildErrorState()
-                  : _pairs.isEmpty
-                      ? _buildWaitingState()
-                      : Column(children: [_buildMap(), _buildStatusBar(), _buildBottom()])),
+              Expanded(child: _bottomTab == 0 ? _buildMapTab() : _buildPermissionsTab()),
             ])),
           ),
+          bottomNavigationBar: _buildBottomNav(),
         ),
       ),
     );
   }
+
+  Widget _buildMapTab() => Column(children: [
+    if (_notifDenied) _buildNotifBanner(),
+    if (!_isProtected && _adminProtectionActive == false) _buildAdminBanner(),
+    if (_updateInfo != null) _buildUpdateBanner(),
+    if (_pairs.isNotEmpty) _buildPartnerStrip(),
+    Expanded(child: _errorText != null
+        ? _buildErrorState()
+        : _pairs.isEmpty
+            ? _buildWaitingState()
+            : Column(children: [_buildMap(), _buildStatusBar(), _buildBottom()])),
+  ]);
+
+  Widget _buildBottomNav() => BottomNavigationBar(
+    currentIndex: _bottomTab,
+    onTap: (i) => setState(() => _bottomTab = i),
+    backgroundColor: AppColors.surface,
+    selectedItemColor: _roleColor,
+    unselectedItemColor: AppColors.textMuted,
+    type: BottomNavigationBarType.fixed,
+    items: [
+      const BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Harita'),
+      BottomNavigationBarItem(
+        icon: _permIssueCount > 0
+            ? Badge(label: Text('$_permIssueCount'), child: const Icon(Icons.shield_rounded))
+            : const Icon(Icons.shield_rounded),
+        label: 'İzinler',
+      ),
+    ],
+  );
+
+  Widget _buildPermissionsTab() => ListView(
+    padding: const EdgeInsets.all(16),
+    children: [
+      Text('İzinler ve Ayarlar', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+      const SizedBox(height: 4),
+      Text('Uygulamanın düzgün çalışması için gereken her şey tek yerde.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+      const SizedBox(height: 20),
+      _permissionCard(
+        icon: Icons.notifications_rounded,
+        title: 'Bildirimler',
+        desc: 'Kapalıysa mesaj, pil ve alarm bildirimlerini hiç görmezsin.',
+        ok: !_notifDenied,
+        loading: false,
+        onTap: () => openAppSettings(),
+      ),
+      const SizedBox(height: 12),
+      _permissionCard(
+        icon: Icons.battery_charging_full_rounded,
+        title: 'Pil Kısıtlaması',
+        desc: 'Kapalı olmazsa telefon, uygulamayı arka planda öldürüp takibi durdurabilir.',
+        ok: _batteryOptOn == null ? null : !_batteryOptOn!,
+        loading: _batteryOptOn == null,
+        onTap: () async {
+          await Permission.ignoreBatteryOptimizations.request();
+          await _checkBatteryOpt();
+        },
+      ),
+      if (!_isProtected) ...[
+        const SizedBox(height: 12),
+        _permissionCard(
+          icon: Icons.security_rounded,
+          title: 'Silme Koruması',
+          desc: 'Açık olursa uygulama silinmeye çalışıldığında yöneticiye anında haber verilir.',
+          ok: _adminProtectionActive,
+          loading: _adminProtectionActive == null,
+          onTap: () async {
+            await DeviceAdminService.requestActivation();
+            await _checkDeviceAdmin();
+          },
+        ),
+      ],
+      const SizedBox(height: 12),
+      _oemInfoCard(),
+    ],
+  );
+
+  Widget _permissionCard({
+    required IconData icon,
+    required String title,
+    required String desc,
+    required bool? ok,
+    required VoidCallback onTap,
+    bool loading = false,
+  }) {
+    final color = loading ? AppColors.textMuted : (ok == true ? AppColors.safe : AppColors.danger);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+          alignment: Alignment.center,
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(width: 8),
+            if (!loading) Icon(ok == true ? Icons.check_circle_rounded : Icons.error_rounded, color: color, size: 16),
+          ]),
+          const SizedBox(height: 4),
+          Text(desc, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted, height: 1.4)),
+          if (!loading && ok != true) ...[
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: onTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.4))),
+                child: Text('Ayarla', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+              ),
+            ),
+          ],
+        ])),
+      ]),
+    );
+  }
+
+  // OEM (Honor/Huawei/Xiaomi vb.) otomatik başlatma ayarının durumu
+  // programatik olarak okunamıyor — Android'in genel API'si bunu sunmuyor.
+  // Bu yüzden yeşil/kırmızı bir durum yerine sadece bilgilendirme + doğrudan
+  // ayar sayfasına yönlendirme gösteriliyor.
+  Widget _oemInfoCard() => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(color: AppColors.warning.withOpacity(0.08), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.warning.withOpacity(0.3))),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Icon(Icons.smartphone_rounded, color: AppColors.warning, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text('Telefon Üreticisi Ayarları', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+      ]),
+      const SizedBox(height: 6),
+      Text(
+        'Honor/Huawei/Xiaomi gibi telefonlarda yukarıdaki izinler tek başına yetmeyebilir. Ayarlar > Pil > Uygulama başlatma (ya da "Otomatik Başlatma") bölümünden UZAKDUR için manuel yönetimi aç ve üç seçeneği de (Otomatik başlatma, İkincil başlatma, Arka planda çalışma) etkinleştir. Bu ayar işletim sistemine özel olduğu için uygulama içinden kontrol edilemez.',
+        style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary, height: 1.5),
+      ),
+      const SizedBox(height: 10),
+      GestureDetector(
+        onTap: () => openAppSettings(),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(color: AppColors.warning.withOpacity(0.15), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.warning.withOpacity(0.4))),
+          child: Text('Uygulama Ayarlarını Aç', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.warning)),
+        ),
+      ),
+    ]),
+  );
 
   Widget _buildTopBar() => Container(
     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
