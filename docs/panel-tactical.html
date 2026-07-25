@@ -67,15 +67,21 @@
     background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
   }
-  .app-shell { display:flex; flex-direction:column; min-height:100vh; }
+  /* Diğer iki panelde ("Komuta Merkezi" üstte yatay komuta çubuğu,
+     orijinalde geniş etiketli sol menü) sayfa iskeleti tekrar ediyordu.
+     Burada gerçek bir operasyon merkezi gibi: solda dar ikon rayı +
+     ana alan üç sütuna bölünmüş "mission control" ızgarası (hedef
+     listesi | radar/harita | canlı olay akışı) — sayfa YAPISI da farklı. */
+  .app-shell { display:flex; flex-direction:row; min-height:100vh; }
   .sidebar {
-    flex-shrink:0; position:sticky; top:0; z-index:40;
-    display:flex; flex-direction:row; align-items:center; gap:18px;
-    background: rgba(5,8,11,.92); backdrop-filter: blur(8px);
-    border-bottom:1px solid var(--border); padding:12px 26px;
-    box-shadow: 0 1px 0 rgba(34,211,238,.15);
+    width:64px; flex-shrink:0; position:sticky; top:0; height:100vh; z-index:40;
+    display:flex; flex-direction:column; align-items:center; gap:22px;
+    background: rgba(5,8,11,.95); backdrop-filter: blur(8px);
+    border-right:1px solid var(--border); padding:18px 0;
+    box-shadow: 1px 0 0 rgba(34,211,238,.15);
   }
-  .brand { display:flex; align-items:center; gap:11px; flex-shrink:0; }
+  .brand { display:flex; flex-direction:column; align-items:center; gap:0; flex-shrink:0; }
+  .brand > div:last-child { display:flex; flex-direction:column; align-items:center; }
   .logo {
     width:38px; height:38px; border-radius:4px; font-size:17px;
     background: rgba(34,211,238,.08); border:1px solid var(--accent);
@@ -88,36 +94,37 @@
     70% { box-shadow: 0 0 0 9px rgba(34,211,238,0), 0 0 14px rgba(34,211,238,.35); }
     100% { box-shadow: 0 0 0 0 rgba(34,211,238,0), 0 0 14px rgba(34,211,238,.35); }
   }
-  .brand-name { font-family:var(--font-display); font-size:15px; letter-spacing:3px; font-weight:700; color:var(--accent2); line-height:1.3; text-shadow:0 0 10px rgba(34,255,136,.4); }
-  .brand-tag { font-size:9.5px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; }
+  .brand-name, .brand-tag { display:none; }
   h1 { font-family:var(--font-display); font-size:20px; letter-spacing:2px; font-weight:700; margin:0; color:var(--text); text-transform:uppercase; }
   .subtitle { color:var(--text2); font-size:13.5px; margin: 6px 0 24px; display:flex; align-items:center; }
   .sidenav {
-    display:flex; flex-direction:row; gap:2px; flex:1; justify-content:center;
-    background:var(--surface); padding:4px; border-radius:var(--radius-sm); max-width:560px; margin:0 auto;
-    border:1px solid var(--border-soft);
+    display:flex; flex-direction:column; gap:8px; flex:1; justify-content:flex-start; align-items:center;
+    background:transparent; padding:0; border-radius:0; max-width:none; margin:0; border:none;
   }
   .nav-item {
-    display:flex; align-items:center; gap:8px; width:auto; text-align:left; justify-content:center;
-    background:transparent; color:var(--text2); border:none; box-shadow:none;
-    padding:9px 16px; font-size:12px; font-weight:600; border-radius:var(--radius-sm); flex:1;
+    display:flex; align-items:center; justify-content:center; width:42px; height:42px;
+    background:transparent; color:var(--text2); border:1px solid transparent; box-shadow:none;
+    padding:0; font-size:12px; font-weight:600; border-radius:var(--radius-sm); flex:none;
     position:relative; transform:none !important; text-transform:uppercase; letter-spacing:1px;
     font-family:var(--font-display);
   }
-  .nav-item:hover { background:var(--surface-hover); filter:none; transform:none; color:var(--text); }
-  .nav-item.active { background:var(--accent-soft); color:var(--accent); font-weight:800; box-shadow:inset 0 0 0 1px rgba(34,211,238,.5), 0 0 10px rgba(34,211,238,.2); }
+  .nav-item:hover { background:var(--surface-hover); filter:none; transform:none; color:var(--text); border-color:var(--border-soft); }
+  .nav-item.active { background:var(--accent-soft); color:var(--accent); font-weight:800; box-shadow:inset 0 0 0 1px rgba(34,211,238,.5), 0 0 10px rgba(34,211,238,.2); border-color:transparent; }
   .nav-item.active .nav-icon { filter:none; }
-  .nav-icon { font-size:14px; line-height:1; filter:grayscale(1) brightness(1.6); }
+  .nav-icon { font-size:18px; line-height:1; filter:grayscale(1) brightness(1.6); }
   .nav-item.active .nav-icon { filter:none; }
-  .nav-label { flex:none; }
+  .nav-label { display:none; }
   .nav-item .req-dot {
-    background:var(--danger); color:#000; border-radius:3px; padding:1px 7px;
-    font-size:10px; font-weight:800; box-shadow:0 0 8px rgba(255,59,59,.6);
+    position:absolute; top:-4px; right:-4px;
+    background:var(--danger); color:#000; border-radius:3px; padding:1px 5px;
+    font-size:9px; font-weight:800; box-shadow:0 0 8px rgba(255,59,59,.6);
   }
-  .sidebar-footer { flex-shrink:0; display:flex; flex-direction:row; align-items:center; gap:12px; }
-  .live-status { display:flex; align-items:center; font-size:11px; color:var(--accent2); white-space:nowrap; text-transform:uppercase; letter-spacing:1px; font-family:var(--font-display); }
-  .nav-notif-btn { justify-content:center; display:flex; white-space:nowrap; }
-  .main-content { flex:1; min-width:0; padding:26px 32px 90px; max-width:1180px; width:100%; margin:0 auto; }
+  .sidebar-footer { flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:14px; margin-top:auto; }
+  .live-status { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:11px; color:var(--accent2); white-space:nowrap; text-transform:uppercase; letter-spacing:1px; font-family:var(--font-display); }
+  .live-label { display:none; }
+  .nav-notif-btn { justify-content:center; display:flex; white-space:nowrap; width:36px; height:36px; padding:0; }
+  .notif-label { display:none; }
+  .main-content { flex:1; min-width:0; padding:26px 32px 90px; max-width:1400px; width:100%; margin:0; }
   #errBanner, #tamperBanner, #criticalOnLoadBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
   #errBanner { background:var(--danger-soft); border:1px solid rgba(255,59,59,.35); color:var(--danger); }
   #tamperBanner { background:var(--warning-soft); border:1px solid rgba(255,179,0,.35); color:var(--warning); }
@@ -241,7 +248,16 @@
   .map-label.protected { border-color:rgba(34,255,136,.4) !important; color:var(--safe) !important; }
   .map-label.tracked { border-color:rgba(255,59,59,.4) !important; color:var(--danger) !important; }
   .map-label::before { display:none !important; }
-  #allCasesMap { width:100%; height:420px; border-radius:14px; border:1px solid var(--border-soft); background:var(--surface-hover); }
+  #allCasesMap { width:100%; height:640px; border-radius:var(--radius); border:1px solid var(--border-soft); background:var(--surface-hover); }
+  /* Üç sütunlu "mission control" ızgarası: hedef listesi | radar/harita | canlı akış. */
+  #tabPanel_ops { display:grid; grid-template-columns: 300px 1fr 300px; gap:14px; align-items:start; }
+  #tabPanel_ops .card { margin-bottom:0; }
+  .ops-scroll { max-height:640px; overflow-y:auto; }
+  @media (max-width: 1180px) {
+    #tabPanel_ops { grid-template-columns: 1fr; }
+    .ops-scroll { max-height:none; overflow-y:visible; }
+    #allCasesMap { height:420px; }
+  }
   .ops-row { cursor:pointer; }
   .led { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:8px; flex-shrink:0; }
   .led.acil { background:var(--danger); box-shadow:0 0 9px rgba(255,59,59,.7); animation: pulse .9s ease-in-out infinite; }
@@ -355,19 +371,19 @@
     }
     .brand { display:none; }
     .sidenav { flex-direction:row; flex:1; gap:2px; }
-    .nav-item { flex-direction:column; flex:1; padding:7px 2px 6px; gap:3px; border-radius:10px; }
-    .nav-label { flex:none; font-size:9.5px; text-align:center; line-height:1.2; }
+    .nav-item { flex-direction:column; flex:1; width:auto; height:auto; padding:7px 2px 6px; gap:3px; border-radius:10px; }
+    .nav-label { display:block; flex:none; font-size:9.5px; text-align:center; line-height:1.2; }
     .nav-icon { font-size:17px; }
     .nav-item .req-dot { position:absolute; top:2px; right:14%; padding:0 5px; font-size:9px; }
     .sidebar-footer { flex-direction:row; border-top:none; padding-top:0; margin-top:0; gap:6px; }
     .live-status { display:none; }
-    .nav-notif-btn { width:auto; padding:9px; }
+    .nav-notif-btn { width:auto; height:auto; padding:9px; }
     .nav-notif-btn .notif-label { display:none; }
-    .main-content { padding:18px 12px 84px; }
+    .main-content { padding:18px 12px 84px; margin-left:0; }
     h1 { font-size:15.5px; letter-spacing:1.5px; }
     .stats-row { grid-template-columns: repeat(2, 1fr); gap:10px; margin-bottom:16px; }
     .stat-card { padding:13px 14px; }
-    .card { padding:15px; border-radius:15px; margin-bottom:14px; }
+    .card { padding:15px; border-radius:var(--radius); margin-bottom:14px; }
     table { font-size:12px; }
     th, td { padding:9px 7px; }
     .row[style*="space-between"] { align-items:flex-start; }
@@ -395,7 +411,7 @@
 
 <div class="app-shell" id="app" style="display:none;">
 <aside class="sidebar">
-  <div class="brand">
+  <div class="brand" title="UZAKDUR — Yönetici Paneli">
     <div class="logo">📡</div>
     <div>
       <div class="brand-name">UZAKDUR</div>
@@ -403,13 +419,13 @@
     </div>
   </div>
   <nav class="sidenav">
-    <button class="nav-item" id="mainTab_ops" onclick="showMainTab('ops')"><span class="nav-icon">🎯</span><span class="nav-label">Operasyon</span></button>
-    <button class="nav-item" id="mainTab_devices" onclick="showMainTab('devices')"><span class="nav-icon">📱</span><span class="nav-label">Cihazlar &amp; Eşleşmeler</span></button>
-    <button class="nav-item" id="mainTab_requests" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDot">0</span></button>
+    <button class="nav-item" id="mainTab_ops" title="Operasyon" onclick="showMainTab('ops')"><span class="nav-icon">🎯</span><span class="nav-label">Operasyon</span></button>
+    <button class="nav-item" id="mainTab_devices" title="Cihazlar &amp; Eşleşmeler" onclick="showMainTab('devices')"><span class="nav-icon">📱</span><span class="nav-label">Cihazlar &amp; Eşleşmeler</span></button>
+    <button class="nav-item" id="mainTab_requests" title="Talepler" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDot">0</span></button>
   </nav>
   <div class="sidebar-footer">
-    <div class="live-status"><span id="liveDot"></span>Canlı izleniyor</div>
-    <button class="secondary nav-notif-btn" id="notifBtn" onclick="enableNotifications()">🔔 <span class="notif-label">Bildirimleri Aç</span></button>
+    <div class="live-status" title="Canlı izleniyor"><span id="liveDot"></span><span class="live-label">Canlı izleniyor</span></div>
+    <button class="secondary nav-notif-btn" id="notifBtn" title="Bildirimleri Aç" onclick="enableNotifications()">🔔<span class="notif-label">Bildirimleri Aç</span></button>
   </div>
 </aside>
 
@@ -427,19 +443,24 @@
   </div>
 
   <div id="tabPanel_ops">
-    <div class="card">
+    <div class="card ops-scroll">
       <div class="row" style="justify-content:space-between;">
-        <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
-        <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
+        <h2 style="margin:0;">🎯 Hedef Listesi</h2>
       </div>
+      <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:100%; margin-bottom:12px;" oninput="render()"/>
       <div id="opsBody"><div class="empty">Yükleniyor…</div></div>
     </div>
 
     <div class="card">
+      <h2>🗺️ Radar — Tüm Vakalar</h2>
+      <div id="allCasesMap"></div>
+    </div>
+
+    <div class="card ops-scroll">
       <div class="row" style="justify-content:space-between; margin-bottom:6px;">
         <h2 style="margin:0;">Canlı Akış</h2>
-        <input type="date" id="feedDate" onchange="renderLiveFeed()" style="width:155px;"/>
       </div>
+      <input type="date" id="feedDate" onchange="renderLiveFeed()" style="width:100%; margin-bottom:8px;"/>
       <div class="feed-tabs">
         <button class="feed-tab urgent" id="feedTab_urgent" onclick="toggleLiveFeedTab('urgent')">🆘 Acil! <span class="cnt" id="feedCnt_urgent">0</span></button>
         <button class="feed-tab important" id="feedTab_important" onclick="toggleLiveFeedTab('important')">⚠ Önemli! <span class="cnt" id="feedCnt_important">0</span></button>
@@ -448,11 +469,6 @@
       <div id="liveFeedPanel" class="hidden">
         <div id="liveFeed" class="empty">Henüz olay yok.</div>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>🗺️ Tüm Vakalar Haritası</h2>
-      <div id="allCasesMap"></div>
     </div>
   </div>
 
@@ -1123,8 +1139,8 @@ function renderAllCasesMap(pairIds) {
   allCasesLayers.forEach(l => allCasesMapObj.removeLayer(l));
   allCasesLayers = [];
 
-  const colorFor = { acil: '#EF4444', kritik: '#F59E0B', sinir: '#3B82F6', safe: '#22C55E', unknown: '#6B7686' };
-  const GREEN = '#22C55E', RED = '#EF4444';
+  const colorFor = { acil: '#FF3B3B', kritik: '#FFB300', sinir: '#22D3EE', safe: '#22FF88', unknown: '#4C6572' };
+  const GREEN = '#22FF88', RED = '#FF3B3B';
   const pts = [];
   pairIds.forEach((pid, idx) => {
     const st = pairStatus(pid);
@@ -1142,20 +1158,20 @@ function renderAllCasesMap(pairIds) {
       // Sınır (acil/kritik/sınır) çemberleri artık vaka detayına girmeden
       // tüm vakalar haritasında da görünüyor.
       if (p.threshold > 0) {
-        const acil = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold * 0.5, color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.05, weight: 1 }).addTo(allCasesMapObj);
-        const kritik = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold * 0.8, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.03, weight: 1, dashArray: '4,4' }).addTo(allCasesMapObj);
-        const sinir = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.02, weight: 1, dashArray: '2,6' }).addTo(allCasesMapObj);
+        const acil = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold * 0.5, color: '#FF3B3B', fillColor: '#FF3B3B', fillOpacity: 0.05, weight: 1 }).addTo(allCasesMapObj);
+        const kritik = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold * 0.8, color: '#FFB300', fillColor: '#FFB300', fillOpacity: 0.03, weight: 1, dashArray: '4,4' }).addTo(allCasesMapObj);
+        const sinir = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold, color: '#22D3EE', fillColor: '#22D3EE', fillOpacity: 0.02, weight: 1, dashArray: '2,6' }).addTo(allCasesMapObj);
         allCasesLayers.push(acil, kritik, sinir);
       }
       // Yasak bölgeler (daire) ve korunanın güzergahları (rota) da tüm
       // vakalar haritasında görünür — detaya girmeden genel resim.
       for (const [zid, z] of Object.entries(deviceZones(p.protectedDeviceId))) {
         if (z.type === 'route' && Array.isArray(z.points) && z.points.length >= 2) {
-          const line = L.polyline(z.points.map(pt => [pt.lat, pt.lon]), { color: '#3B82F6', weight: 4, opacity: .55, dashArray: '8,6' })
+          const line = L.polyline(z.points.map(pt => [pt.lat, pt.lon]), { color: '#22D3EE', weight: 4, opacity: .55, dashArray: '8,6' })
             .addTo(allCasesMapObj).bindPopup(`🛣️ ${escapeHtml(z.label)}`);
           allCasesLayers.push(line);
         } else {
-          const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.15, weight: 1, dashArray: '6,5' })
+          const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#FFB300', fillColor: '#FFB300', fillOpacity: 0.15, weight: 1, dashArray: '6,5' })
             .addTo(allCasesMapObj).bindPopup(`🚫 ${escapeHtml(z.label)}`);
           allCasesLayers.push(c);
         }
@@ -1760,7 +1776,7 @@ function undoRoutePoint() {
 function updateRoutePolyline() {
   if (routePolyline) { zonePickerMapObj.removeLayer(routePolyline); routePolyline = null; }
   if (routePoints.length >= 2) {
-    routePolyline = L.polyline(routePoints.map(p => [p.lat, p.lon]), { color: '#3B82F6', weight: 4, dashArray: '8,6' }).addTo(zonePickerMapObj);
+    routePolyline = L.polyline(routePoints.map(p => [p.lat, p.lon]), { color: '#22D3EE', weight: 4, dashArray: '8,6' }).addTo(zonePickerMapObj);
   }
   document.getElementById('zoneRoutePointCount').textContent = `${routePoints.length} nokta`;
   document.getElementById('zoneSaveBtn').disabled = routePoints.length < 2;
@@ -1780,7 +1796,7 @@ function openZonePicker() {
       zonePickerMapObj.on('click', (e) => {
         if (zonePickerMode === 'route') {
           routePoints.push({ lat: e.latlng.lat, lon: e.latlng.lng });
-          const m = L.circleMarker(e.latlng, { radius: 5, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 1 }).addTo(zonePickerMapObj);
+          const m = L.circleMarker(e.latlng, { radius: 5, color: '#22D3EE', fillColor: '#22D3EE', fillOpacity: 1 }).addTo(zonePickerMapObj);
           routePointMarkers.push(m);
           updateRoutePolyline();
         } else {
@@ -1967,7 +1983,7 @@ function updateDetailMap() {
   const tName = devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan';
   const pts = [];
   if (pLoc) {
-    const m = L.circleMarker([pLoc.lat, pLoc.lon], { radius: 8, color: '#22C55E', fillColor: '#22C55E', fillOpacity: .9, weight: 2 })
+    const m = L.circleMarker([pLoc.lat, pLoc.lon], { radius: 8, color: '#22FF88', fillColor: '#22FF88', fillOpacity: .9, weight: 2 })
       .addTo(detailMapObj).bindPopup('🛡️ ' + pName)
       .bindTooltip(`${n}-Korunan ${escapeHtml(pName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label protected' });
     detailMarkers.push(m);
@@ -1975,13 +1991,13 @@ function updateDetailMap() {
     // Üç kademe, eşiğin (p.threshold) yüzdesine göre: kırmızı (%50, ACİL/tam
     // alarm), turuncu (%80, KRİTİK), mavi (%100, SINIR — dış sınır).
     if (p.threshold > 0) {
-      detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.5, color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.1, weight: 1 }).addTo(detailMapObj);
-      detailCautionCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.8, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.07, weight: 1, dashArray: '4,4' }).addTo(detailMapObj);
-      detailSinirCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.04, weight: 1, dashArray: '2,6' }).addTo(detailMapObj);
+      detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.5, color: '#FF3B3B', fillColor: '#FF3B3B', fillOpacity: 0.1, weight: 1 }).addTo(detailMapObj);
+      detailCautionCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.8, color: '#FFB300', fillColor: '#FFB300', fillOpacity: 0.07, weight: 1, dashArray: '4,4' }).addTo(detailMapObj);
+      detailSinirCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold, color: '#22D3EE', fillColor: '#22D3EE', fillOpacity: 0.04, weight: 1, dashArray: '2,6' }).addTo(detailMapObj);
     }
   }
   if (tLoc) {
-    const m = L.circleMarker([tLoc.lat, tLoc.lon], { radius: 8, color: '#EF4444', fillColor: '#EF4444', fillOpacity: .9, weight: 2 })
+    const m = L.circleMarker([tLoc.lat, tLoc.lon], { radius: 8, color: '#FF3B3B', fillColor: '#FF3B3B', fillOpacity: .9, weight: 2 })
       .addTo(detailMapObj).bindPopup('🎯 ' + tName)
       .bindTooltip(`${n}-Uzaklaştırılan ${escapeHtml(tName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label tracked' });
     detailMarkers.push(m);
@@ -1990,7 +2006,7 @@ function updateDetailMap() {
   for (const [zid, z] of Object.entries(deviceZones(p.protectedDeviceId))) {
     if (z.type === 'route' && Array.isArray(z.points) && z.points.length >= 2) {
       const latlngs = z.points.map(pt => [pt.lat, pt.lon]);
-      const line = L.polyline(latlngs, { color: '#3B82F6', weight: 5, opacity: .7, dashArray: '10,6' })
+      const line = L.polyline(latlngs, { color: '#22D3EE', weight: 5, opacity: .7, dashArray: '10,6' })
         .addTo(detailMapObj).bindPopup(`🛣️ ${escapeHtml(z.label)} (${z.width || 80}m koridor — kritik/sınır uyarısı)`);
       detailZoneLayers.push(line);
       const mid = z.points[Math.floor(z.points.length / 2)];
@@ -2000,7 +2016,7 @@ function updateDetailMap() {
       latlngs.forEach(ll => pts.push(ll));
       continue;
     }
-    const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.22, weight: 2, dashArray: '6,5' }).addTo(detailMapObj).bindPopup('🚫 ' + escapeHtml(z.label));
+    const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#FFB300', fillColor: '#FFB300', fillOpacity: 0.22, weight: 2, dashArray: '6,5' }).addTo(detailMapObj).bindPopup('🚫 ' + escapeHtml(z.label));
     detailZoneLayers.push(c);
     const zm = L.marker([z.lat, z.lon], { icon: L.divIcon({ className: 'zone-pin', html: '🚫', iconSize: [22, 22] }) }).addTo(detailMapObj).bindPopup('🚫 ' + escapeHtml(z.label));
     detailZoneLayers.push(zm);
