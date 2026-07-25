@@ -1,0 +1,2151 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
+<title>UZAKDUR — OPS//TAKİP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Panel tamamen kapalıyken de bildirim alabilmek için (bkz. sw.js'teki
+     arka plan işleyici + enableNotifications()'daki token kaydı). -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
+<style>
+  /* ================================================================
+     "OPS//TAKİP" — üçüncü alternatif kabuk: koyu, taktik, istihbarat
+     operasyon merkezi estetiği (radar ızgarası, fosfor yeşili/amber/kırmızı
+     durum renkleri, tamamen monospace, keskin köşeler, köşebent çerçeveler).
+     Alttaki JS mantığı, veri akışı ve tüm fonksiyon/id'ler index.html ve
+     panel-light.html ile BİREBİR AYNI — sadece kabuk. Diğer iki panel
+     (karanlık orijinal + açık "Komuta Merkezi") hiç etkilenmedi.
+     ================================================================ */
+  :root {
+    --bg: #05080B;
+    --surface: #0B1116;
+    --surface-high: #0F161C;
+    --surface-hover: #16202A;
+    --border: #223038;
+    --border-soft: #1A252C;
+    --safe: #22FF88;
+    --safe-soft: rgba(34,255,136,.10);
+    --warning: #FFB300;
+    --warning-soft: rgba(255,179,0,.12);
+    --danger: #FF3B3B;
+    --danger-soft: rgba(255,59,59,.13);
+    --role-a: #FF3B3B;
+    --role-b: #22D3EE;
+    --accent: #22D3EE;
+    --accent2: #22FF88;
+    --accent-soft: rgba(34,211,238,.12);
+    --text: #D3E4E8;
+    --text2: #7C93A0;
+    --muted: #4C6572;
+    --disabled: #263239;
+    --radius: 4px;
+    --radius-sm: 3px;
+    --font-display: 'Share Tech Mono', 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; color:var(--text);
+    font-family:'JetBrains Mono','Roboto Mono',monospace;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(rgba(34,211,238,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34,211,238,.05) 1px, transparent 1px),
+      radial-gradient(1100px 600px at 8% -14%, rgba(34,211,238,.10), transparent 60%),
+      radial-gradient(900px 520px at 100% 0%, rgba(34,255,136,.06), transparent 60%),
+      radial-gradient(900px 500px at 50% 115%, rgba(255,59,59,.05), transparent 60%);
+    background-size: 34px 34px, 34px 34px, auto, auto, auto;
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app-shell { display:flex; flex-direction:column; min-height:100vh; }
+  .sidebar {
+    flex-shrink:0; position:sticky; top:0; z-index:40;
+    display:flex; flex-direction:row; align-items:center; gap:18px;
+    background: rgba(5,8,11,.92); backdrop-filter: blur(8px);
+    border-bottom:1px solid var(--border); padding:12px 26px;
+    box-shadow: 0 1px 0 rgba(34,211,238,.15);
+  }
+  .brand { display:flex; align-items:center; gap:11px; flex-shrink:0; }
+  .logo {
+    width:38px; height:38px; border-radius:4px; font-size:17px;
+    background: rgba(34,211,238,.08); border:1px solid var(--accent);
+    box-shadow: 0 0 0 3px rgba(34,211,238,.08), 0 0 14px rgba(34,211,238,.35);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    position:relative; animation: radarping 2.4s ease-out infinite;
+  }
+  @keyframes radarping {
+    0% { box-shadow: 0 0 0 0 rgba(34,211,238,.45), 0 0 14px rgba(34,211,238,.35); }
+    70% { box-shadow: 0 0 0 9px rgba(34,211,238,0), 0 0 14px rgba(34,211,238,.35); }
+    100% { box-shadow: 0 0 0 0 rgba(34,211,238,0), 0 0 14px rgba(34,211,238,.35); }
+  }
+  .brand-name { font-family:var(--font-display); font-size:15px; letter-spacing:3px; font-weight:700; color:var(--accent2); line-height:1.3; text-shadow:0 0 10px rgba(34,255,136,.4); }
+  .brand-tag { font-size:9.5px; color:var(--muted); letter-spacing:1.5px; text-transform:uppercase; }
+  h1 { font-family:var(--font-display); font-size:20px; letter-spacing:2px; font-weight:700; margin:0; color:var(--text); text-transform:uppercase; }
+  .subtitle { color:var(--text2); font-size:13.5px; margin: 6px 0 24px; display:flex; align-items:center; }
+  .sidenav {
+    display:flex; flex-direction:row; gap:2px; flex:1; justify-content:center;
+    background:var(--surface); padding:4px; border-radius:var(--radius-sm); max-width:560px; margin:0 auto;
+    border:1px solid var(--border-soft);
+  }
+  .nav-item {
+    display:flex; align-items:center; gap:8px; width:auto; text-align:left; justify-content:center;
+    background:transparent; color:var(--text2); border:none; box-shadow:none;
+    padding:9px 16px; font-size:12px; font-weight:600; border-radius:var(--radius-sm); flex:1;
+    position:relative; transform:none !important; text-transform:uppercase; letter-spacing:1px;
+    font-family:var(--font-display);
+  }
+  .nav-item:hover { background:var(--surface-hover); filter:none; transform:none; color:var(--text); }
+  .nav-item.active { background:var(--accent-soft); color:var(--accent); font-weight:800; box-shadow:inset 0 0 0 1px rgba(34,211,238,.5), 0 0 10px rgba(34,211,238,.2); }
+  .nav-item.active .nav-icon { filter:none; }
+  .nav-icon { font-size:14px; line-height:1; filter:grayscale(1) brightness(1.6); }
+  .nav-item.active .nav-icon { filter:none; }
+  .nav-label { flex:none; }
+  .nav-item .req-dot {
+    background:var(--danger); color:#000; border-radius:3px; padding:1px 7px;
+    font-size:10px; font-weight:800; box-shadow:0 0 8px rgba(255,59,59,.6);
+  }
+  .sidebar-footer { flex-shrink:0; display:flex; flex-direction:row; align-items:center; gap:12px; }
+  .live-status { display:flex; align-items:center; font-size:11px; color:var(--accent2); white-space:nowrap; text-transform:uppercase; letter-spacing:1px; font-family:var(--font-display); }
+  .nav-notif-btn { justify-content:center; display:flex; white-space:nowrap; }
+  .main-content { flex:1; min-width:0; padding:26px 32px 90px; max-width:1180px; width:100%; margin:0 auto; }
+  #errBanner, #tamperBanner, #criticalOnLoadBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+  #errBanner { background:var(--danger-soft); border:1px solid rgba(255,59,59,.35); color:var(--danger); }
+  #tamperBanner { background:var(--warning-soft); border:1px solid rgba(255,179,0,.35); color:var(--warning); }
+  #criticalOnLoadBanner { background:var(--danger-soft); border:1px solid rgba(255,59,59,.4); color:var(--danger); font-weight:600; white-space:normal; }
+  .stats-row {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:10px; margin-bottom:24px;
+  }
+  .stat-card {
+    background: var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px;
+    position:relative; overflow:hidden; display:flex; flex-direction:column; gap:8px;
+  }
+  .stat-card::before {
+    content:''; position:absolute; top:0; left:0; width:100%; height:2px;
+    background:linear-gradient(90deg, var(--accent), transparent 70%);
+  }
+  .stat-icon {
+    width:26px; height:26px; border-radius:3px; display:flex; align-items:center; justify-content:center;
+    font-size:13px; background:var(--accent-soft); flex-shrink:0; border:1px solid var(--border-soft);
+    filter:grayscale(1) brightness(1.8) contrast(1.2);
+  }
+  .stat-card .num { font-family:var(--font-display); font-size:26px; font-weight:700; letter-spacing:1px; color:var(--accent2); text-shadow:0 0 12px rgba(34,255,136,.3); }
+  .stat-card .lbl { font-size:9.5px; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:-4px; font-weight:700; }
+  .card {
+    background: var(--surface);
+    border:1px solid var(--border); border-radius:var(--radius); padding:22px;
+    margin-bottom:20px; position:relative;
+  }
+  .card::before, .card::after {
+    content:''; position:absolute; width:9px; height:9px; border-color:var(--border-soft); border-style:solid;
+    opacity:.7;
+  }
+  .card::before { top:-1px; left:-1px; border-width:1px 0 0 1px; }
+  .card::after { bottom:-1px; right:-1px; border-width:0 1px 1px 0; }
+  .card h2 {
+    font-family:var(--font-display); font-size:13px; letter-spacing:2px; color:var(--accent);
+    text-transform:uppercase; margin:0 0 16px; font-weight:700; display:flex; align-items:center; gap:8px;
+  }
+  .card h2::after { content:''; flex:1; height:1px; background:var(--border-soft); }
+  table { width:100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align:left; color:var(--muted); font-weight:700; font-size:10.5px; letter-spacing:1.2px; text-transform:uppercase; padding: 8px 10px; border-bottom:1px solid var(--border); }
+  td { padding: 12px 10px; border-bottom:1px solid var(--border-soft); vertical-align: middle; color:var(--text); }
+  tr:last-child td { border-bottom:none; }
+  tbody tr { transition: background .15s ease; }
+  tbody tr:hover { background: var(--surface-hover); }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; }
+  .dot.on { background:var(--safe); box-shadow:0 0 8px rgba(34,255,136,.7); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.off { background:var(--disabled); }
+  @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:.4; } }
+  .badge { padding:3px 10px; border-radius:3px; font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; font-family:var(--font-display); }
+  .badge.protected { background:rgba(34,211,238,.1); color:var(--role-b); border:1px solid rgba(34,211,238,.35); }
+  .badge.tracked { background:var(--danger-soft); color:var(--role-a); border:1px solid rgba(255,59,59,.35); }
+  .badge.panic { background:var(--danger-soft); color:var(--danger); border:1px solid rgba(255,59,59,.5); animation: pulse 1s ease-in-out infinite; }
+  .batt { font-size:11.5px; color:var(--text2); }
+  .batt.low { color:var(--danger); font-weight:700; }
+  select, input[type=number], input[type=password], input[type=text], input[type=email] {
+    background:var(--bg); border:1px solid var(--border); color:var(--text);
+    border-radius:var(--radius-sm); padding:10px 12px; font-size:13.5px; outline:none;
+    font-family:'JetBrains Mono',monospace; transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(34,211,238,.16); }
+  button {
+    background: transparent;
+    color:var(--accent); border:1px solid var(--accent); border-radius:var(--radius-sm); padding:10px 18px;
+    font-size:12px; font-weight:700; cursor:pointer; font-family:var(--font-display);
+    text-transform:uppercase; letter-spacing:1.5px;
+    box-shadow: 0 0 0 rgba(34,211,238,0);
+    transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+  }
+  button:hover { background:var(--accent); color:#000; box-shadow: 0 0 16px rgba(34,211,238,.5); transform:none; }
+  button:active { transform: translateY(0); }
+  button.secondary { background:transparent; color:var(--text2); border:1px solid var(--border); box-shadow:none; }
+  button.secondary:hover { background:var(--surface-hover); color:var(--text); border-color:var(--muted); box-shadow:none; }
+  button.safe { color:var(--safe); border-color:var(--safe); }
+  button.safe:hover { background:var(--safe); color:#000; box-shadow: 0 0 16px rgba(34,255,136,.5); }
+  button:disabled { opacity:.35; cursor:not-allowed; transform:none; box-shadow:none; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .empty { color:var(--muted); font-size:13px; padding: 14px 4px; }
+  .req { color:var(--warning); font-weight:700; font-size:12px; }
+  .pair-line { display:flex; align-items:center; gap:8px; font-weight:700; color:var(--text); }
+  .arrow { color:var(--muted); }
+  #gate {
+    position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(rgba(34,211,238,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34,211,238,.05) 1px, transparent 1px),
+      radial-gradient(700px 400px at 50% 30%, rgba(34,211,238,.12), transparent 65%);
+    background-size: 34px 34px, 34px 34px, auto;
+  }
+  #gate .box { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:32px; width:300px; text-align:center; box-shadow: 0 0 60px rgba(34,211,238,.08); position:relative; }
+  #gate .box::before, #gate .box::after { content:''; position:absolute; width:14px; height:14px; border-color:var(--accent); border-style:solid; opacity:.6; }
+  #gate .box::before { top:-1px; left:-1px; border-width:2px 0 0 2px; }
+  #gate .box::after { bottom:-1px; right:-1px; border-width:0 2px 2px 0; }
+  #gate input { width:100%; margin: 16px 0; text-align:center; }
+  #gate button { width:100%; }
+  #gate .err { color:var(--danger); font-size:12px; min-height:16px; }
+  small.hint { color:var(--muted); font-size:11.5px; display:block; margin-top:6px; line-height:1.5; }
+  .pair-card-title { cursor:pointer; }
+  .pair-card-title:hover { color: var(--role-b); }
+  .hidden { display:none !important; }
+  #caseView { max-width: 760px; margin: 0 auto; }
+  #zonePickerOverlay { position:fixed; inset:0; background:rgba(27,33,48,.35); backdrop-filter: blur(3px); display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding: 24px 16px; z-index:9990; }
+  #zonePickerBox {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:22px; width:100%; box-shadow: 0 30px 60px rgba(0,0,0,.5);
+    max-width: 580px;
+  }
+  #detailMap { width:100%; height:280px; border-radius:14px; margin-top:12px; background:var(--surface-hover); cursor: default; border:1px solid var(--border-soft); }
+  #zonePickerMap { width:100%; height:340px; border-radius:14px; margin-top:12px; background:var(--surface-hover); cursor:crosshair; border:1px solid var(--border-soft); }
+  .detail-close { background:var(--surface); color:var(--text2); border:1px solid var(--border); border-radius:9px; padding:7px 13px; font-size:12px; box-shadow:none; }
+  #msgOverlay { position:fixed; inset:0; background:rgba(27,33,48,.35); backdrop-filter: blur(3px); display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding: 24px 16px; z-index:9991; }
+  #msgBox { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; width:100%; box-shadow: 0 30px 60px rgba(0,0,0,.5); max-width: 460px; }
+  #msgText { font-family:inherit; font-size:13px; padding:10px; border-radius:10px; border:1px solid var(--border); background:var(--surface-hover); color:var(--text); resize:vertical; width:100%; box-sizing:border-box; }
+  .hist-row { display:flex; justify-content:space-between; align-items:center; font-size:12.5px; padding:8px 0; border-bottom:1px solid var(--border-soft); gap:8px; color:var(--text); }
+  .hist-row:last-child { border-bottom:none; }
+  .feed-row { font-size:12.5px; padding:9px 0; border-bottom:1px solid var(--border-soft); display:flex; justify-content:space-between; gap:10px; color:var(--text); }
+  .feed-row:last-child { border-bottom:none; }
+  #liveDot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:7px; box-shadow:0 0 8px rgba(34,255,136,.5); animation: pulse 1.4s ease-in-out infinite; }
+  .zone-pin { font-size:19px; text-align:center; line-height:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); background:none !important; border:none !important; }
+  .map-label { background:var(--surface) !important; border:1px solid var(--border) !important; border-radius:8px !important; padding:2px 8px !important; font-size:11px !important; font-weight:700 !important; color:var(--text) !important; box-shadow:0 1px 6px rgba(0,0,0,.5); }
+  .map-label.protected { border-color:rgba(34,255,136,.4) !important; color:var(--safe) !important; }
+  .map-label.tracked { border-color:rgba(255,59,59,.4) !important; color:var(--danger) !important; }
+  .map-label::before { display:none !important; }
+  #allCasesMap { width:100%; height:420px; border-radius:14px; border:1px solid var(--border-soft); background:var(--surface-hover); }
+  .ops-row { cursor:pointer; }
+  .led { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:8px; flex-shrink:0; }
+  .led.acil { background:var(--danger); box-shadow:0 0 9px rgba(255,59,59,.7); animation: pulse .9s ease-in-out infinite; }
+  .led.kritik { background:var(--warning); box-shadow:0 0 7px rgba(255,179,0,.5); }
+  .led.sinir { background:var(--accent); box-shadow:0 0 6px rgba(34,211,238,.5); }
+  .led.safe { background:var(--safe); box-shadow:0 0 6px rgba(34,255,136,.4); }
+  .led.unknown { background:var(--disabled); }
+  .status-label { font-size:11px; font-weight:800; letter-spacing:.5px; }
+  .status-label.acil { color:var(--danger); }
+  .status-label.kritik { color:var(--warning); }
+  .status-label.sinir { color:var(--accent); }
+  .status-label.safe { color:var(--safe); }
+  .status-label.unknown { color:var(--muted); }
+  .mono { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--accent2); }
+  .feed-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .feed-tab {
+    background:var(--surface); color:var(--text2); border:1px solid var(--border); box-shadow:none;
+    padding:8px 14px; font-size:12.5px; display:flex; align-items:center; gap:7px; border-radius:var(--radius-sm);
+  }
+  .feed-tab:hover { background:var(--surface-hover); filter:none; }
+  .feed-tab .cnt { background:var(--border); color:var(--text2); border-radius:var(--radius-sm); padding:1px 8px; font-size:11px; font-weight:800; }
+  .feed-tab.urgent.active { background:var(--danger-soft); color:var(--danger); border-color:rgba(255,59,59,.4); }
+  .feed-tab.urgent.active .cnt { background:var(--danger); color:#fff; }
+  .feed-tab.important.active { background:var(--warning-soft); color:var(--warning); border-color:rgba(255,179,0,.4); }
+  .feed-tab.important.active .cnt { background:var(--warning); color:#fff; }
+  .feed-tab.normal.active { background:var(--safe-soft); color:var(--safe); border-color:rgba(34,255,136,.4); }
+  .feed-tab.normal.active .cnt { background:var(--safe); color:#fff; }
+  #liveFeedPanel { margin-top:14px; }
+
+  /* Tablolar dar ekranlarda sıkışıp okunmaz olmak yerine yatay kaysın. */
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px; padding:0 4px; }
+  .table-wrap table { min-width:540px; }
+
+  /* Operasyon Panosu ve Cihazlar artık tablo yerine kart listesi —
+     "mesaj gönder"/"konum iste" gibi eylemler metnin arasına sıkışmış
+     minik ikonlar yerine ayrı, etiketli butonlar olarak duruyor. */
+  .pair-card {
+    background:var(--surface-high); border:1px solid var(--border); border-radius:16px;
+    padding:16px; margin-bottom:12px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease;
+  }
+  .pair-card:hover { border-color:#2E4550; box-shadow:0 6px 18px rgba(34,211,238,.12); }
+  .pair-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:2px; }
+  .pair-card-status {
+    display:flex; align-items:center; gap:6px; padding:4px 11px 4px 8px; border-radius:var(--radius-sm);
+    background: var(--surface-hover);
+  }
+  .pair-card-status:has(.led.acil) { background:var(--danger-soft); }
+  .pair-card-status:has(.led.kritik) { background:var(--warning-soft); }
+  .pair-card-status:has(.led.sinir) { background:var(--accent-soft); }
+  .pair-card-status:has(.led.safe) { background:var(--safe-soft); }
+  .pair-card-dist { font-size:12.5px; color:var(--text2); }
+  .pair-card-title { font-family:var(--font-display); font-weight:700; font-size:14.5px; margin:8px 0 2px; }
+  .pair-card-sub { font-size:11px; color:var(--muted); margin-bottom:10px; }
+  .device-row {
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:11px 0; border-top:1px solid var(--border-soft); flex-wrap:wrap;
+  }
+  .device-row:first-of-type { border-top:none; padding-top:2px; }
+  .device-info { display:flex; align-items:center; gap:10px; min-width:0; }
+  .device-avatar {
+    width:34px; height:34px; border-radius:50%; flex-shrink:0; display:flex; align-items:center;
+    justify-content:center; font-size:14px; font-weight:800; color:#fff;
+  }
+  .device-avatar.role-protected { background:linear-gradient(135deg, #2563EB, #0D9488); }
+  .device-avatar.role-tracked { background:linear-gradient(135deg, #DC2626, #FB923C); }
+  .device-info-text { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .device-name { font-weight:700; font-size:13px; display:flex; align-items:center; gap:6px; }
+  .device-meta { font-size:11px; color:var(--text2); display:flex; gap:10px; flex-wrap:wrap; }
+  .device-meta .batt.low { font-weight:700; }
+  .device-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .err-line { font-size:11px; color:var(--danger); margin-top:6px; display:flex; align-items:baseline; gap:6px; }
+  .err-msg { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; flex:1; cursor:help; }
+  .err-dismiss { flex-shrink:0; color:var(--text2); text-decoration:none; padding:0 4px; }
+  .err-dismiss:hover { color:var(--danger); }
+  .action-btn {
+    display:inline-flex; align-items:center; gap:5px; padding:7px 11px; border-radius:var(--radius-sm);
+    background:var(--surface); border:1px solid var(--border); color:var(--text2);
+    font-size:11px; font-weight:700; text-decoration:none; white-space:nowrap;
+    transition: background .12s ease, color .12s ease;
+  }
+  .action-btn:hover { background:var(--surface-hover); color:var(--text); }
+  .action-btn .ack-dot { margin-left:2px; }
+  .device-card {
+    background:var(--surface-high); border:1px solid var(--border); border-radius:16px;
+    padding:14px 16px; margin-bottom:10px;
+  }
+  .device-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .device-card-name { font-weight:800; font-size:13.5px; display:flex; align-items:center; gap:8px; }
+
+  /* 💬/📞/📍 gibi satır içi ikon linkleri metin boyutunda tıklanabilir alana
+     sahipti — parmakla dokunmayı zorlaştırıyordu. Hepsine tutarlı, dokunmaya
+     uygun bir hedef alan veriyoruz. */
+  .icon-link {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:28px; height:28px; border-radius:8px; text-decoration:none;
+    font-size:14px; vertical-align:middle; transition: background .12s ease;
+  }
+  .icon-link:hover, .icon-link:active { background:var(--surface-hover); }
+  .ack-dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-left:1px; vertical-align:middle; }
+  .ack-dot.ack-ok { background:var(--safe); }
+  .ack-dot.ack-pending { background:var(--warning); animation: pulse 1s ease-in-out infinite; }
+  .ack-dot.ack-fail { background:var(--danger); }
+
+  @media (max-width: 880px) {
+    .app-shell { flex-direction:column; }
+    .sidebar {
+      position:fixed; top:auto; bottom:0; left:0; right:0; width:100%; height:auto;
+      flex-direction:row; align-items:center; padding:6px 10px;
+      border-right:none; border-top:1px solid var(--border); z-index:100;
+      box-shadow: 0 -4px 20px rgba(0,0,0,.4);
+    }
+    .brand { display:none; }
+    .sidenav { flex-direction:row; flex:1; gap:2px; }
+    .nav-item { flex-direction:column; flex:1; padding:7px 2px 6px; gap:3px; border-radius:10px; }
+    .nav-label { flex:none; font-size:9.5px; text-align:center; line-height:1.2; }
+    .nav-icon { font-size:17px; }
+    .nav-item .req-dot { position:absolute; top:2px; right:14%; padding:0 5px; font-size:9px; }
+    .sidebar-footer { flex-direction:row; border-top:none; padding-top:0; margin-top:0; gap:6px; }
+    .live-status { display:none; }
+    .nav-notif-btn { width:auto; padding:9px; }
+    .nav-notif-btn .notif-label { display:none; }
+    .main-content { padding:18px 12px 84px; }
+    h1 { font-size:15.5px; letter-spacing:1.5px; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); gap:10px; margin-bottom:16px; }
+    .stat-card { padding:13px 14px; }
+    .card { padding:15px; border-radius:15px; margin-bottom:14px; }
+    table { font-size:12px; }
+    th, td { padding:9px 7px; }
+    .row[style*="space-between"] { align-items:flex-start; }
+    #opsSearch { width:100% !important; }
+    #allCasesMap { height:260px; }
+    #detailMap { height:210px; }
+    #zonePickerMap { height:260px; }
+    #msgBox, #zonePickerBox { max-width:100%; padding:18px; }
+    #msgOverlay, #zonePickerOverlay { padding:14px 10px; }
+    .pair-line { font-size:14px; flex-wrap:wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="box">
+    <div class="logo" style="margin:0 auto 12px;">📡</div>
+    <div style="font-weight:800; letter-spacing:2px; font-size:14px;">UZAKDUR ADMIN</div>
+    <input type="password" id="pw" placeholder="Şifre"/>
+    <div class="err" id="pwErr"></div>
+    <button onclick="tryLogin()">Giriş</button>
+  </div>
+</div>
+
+<div class="app-shell" id="app" style="display:none;">
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">📡</div>
+    <div>
+      <div class="brand-name">UZAKDUR</div>
+      <div class="brand-tag">Yönetici Paneli</div>
+    </div>
+  </div>
+  <nav class="sidenav">
+    <button class="nav-item" id="mainTab_ops" onclick="showMainTab('ops')"><span class="nav-icon">🎯</span><span class="nav-label">Operasyon</span></button>
+    <button class="nav-item" id="mainTab_devices" onclick="showMainTab('devices')"><span class="nav-icon">📱</span><span class="nav-label">Cihazlar &amp; Eşleşmeler</span></button>
+    <button class="nav-item" id="mainTab_requests" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDot">0</span></button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="live-status"><span id="liveDot"></span>Canlı izleniyor</div>
+    <button class="secondary nav-notif-btn" id="notifBtn" onclick="enableNotifications()">🔔 <span class="notif-label">Bildirimleri Aç</span></button>
+  </div>
+</aside>
+
+<main class="main-content">
+<div id="dashboardView">
+  <div id="errBanner"></div>
+  <div id="tamperBanner"></div>
+  <div id="criticalOnLoadBanner"></div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-icon">📱</div><div class="num" id="statDevices">0</div><div class="lbl">Cihaz</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:var(--safe-soft);">🟢</div><div class="num" id="statOnline">0</div><div class="lbl">Çevrimiçi</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:rgba(34,211,238,.12);">🔗</div><div class="num" id="statPairs">0</div><div class="lbl">Eşleşme</div></div>
+    <div class="stat-card"><div class="stat-icon" style="background:var(--danger-soft);">🚨</div><div class="num" id="statAlarmsToday" style="color:var(--danger);">0</div><div class="lbl">Bugün Alarm</div></div>
+  </div>
+
+  <div id="tabPanel_ops">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
+        <input type="text" id="opsSearch" placeholder="İsimle ara…" style="width:190px;" oninput="render()"/>
+      </div>
+      <div id="opsBody"><div class="empty">Yükleniyor…</div></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px;">
+        <h2 style="margin:0;">Canlı Akış</h2>
+        <input type="date" id="feedDate" onchange="renderLiveFeed()" style="width:155px;"/>
+      </div>
+      <div class="feed-tabs">
+        <button class="feed-tab urgent" id="feedTab_urgent" onclick="toggleLiveFeedTab('urgent')">🆘 Acil! <span class="cnt" id="feedCnt_urgent">0</span></button>
+        <button class="feed-tab important" id="feedTab_important" onclick="toggleLiveFeedTab('important')">⚠ Önemli! <span class="cnt" id="feedCnt_important">0</span></button>
+        <button class="feed-tab normal" id="feedTab_normal" onclick="toggleLiveFeedTab('normal')">ℹ Normal! <span class="cnt" id="feedCnt_normal">0</span></button>
+      </div>
+      <div id="liveFeedPanel" class="hidden">
+        <div id="liveFeed" class="empty">Henüz olay yok.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🗺️ Tüm Vakalar Haritası</h2>
+      <div id="allCasesMap"></div>
+    </div>
+  </div>
+
+  <div id="tabPanel_requests" class="hidden">
+    <div class="card">
+      <h2>🔐 Şifre Sıfırlama Talepleri</h2>
+      <div id="resetRequestsList" class="empty">Bekleyen talep yok.</div>
+    </div>
+
+    <div class="card">
+      <h2>👤 Acil Kişi Talepleri</h2>
+      <div id="contactReqGlobalList" class="empty">Bekleyen talep yok.</div>
+    </div>
+  </div>
+
+  <div id="tabPanel_devices" class="hidden">
+    <div class="card">
+      <h2>Yeni Eşleştirme Oluştur</h2>
+      <div class="row">
+        <select id="selProtected"></select>
+        <span class="arrow">⇄</span>
+        <select id="selTracked"></select>
+        <input type="number" id="newThreshold" value="100" min="10" max="5000" style="width:90px;" title="Alarm eşiği (metre)"/>
+        <span style="color:var(--muted); font-size:12px;">metre</span>
+        <button id="pairBtn" onclick="createPair()">Eşleştir</button>
+      </div>
+      <small class="hint">Bir korunan en fazla 4 uzaklaştırılan, bir uzaklaştırılan en fazla 4 korunan ile eşleştirilebilir. Aynı ikili sadece bir kez eşleştirilebilir.</small>
+    </div>
+
+    <div class="card">
+      <h2>Aktif Eşleşmeler</h2>
+      <div id="pairsList"><div class="empty">Yükleniyor…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Kayıtlı Cihazlar</h2>
+      <small class="hint" style="margin-bottom:8px;">Uygulama artık e-posta + şifre ile giriş desteklediği için yeniden kurulumlarda kopya cihaz oluşmaz. Aşağıdaki eski/kopya kayıtları "Sil" ile temizleyebilirsin.</small>
+      <div id="devicesBody"><div class="empty">Yükleniyor…</div></div>
+    </div>
+  </div>
+
+  <div style="text-align:center; color:var(--muted); font-size:11px; padding:8px 0 4px;">Yusuf BAŞ tarafından üretilmiştir</div>
+</div>
+
+<div id="caseView" class="hidden">
+    <button class="secondary" onclick="closeDetail()" style="margin-bottom:16px;">← Panele Dön</button>
+    <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <div class="pair-line" id="detailTitle" style="font-size:19px;"></div>
+    </div>
+    <div id="detailMap"></div>
+    <div class="row" style="margin-top:14px;">
+      <span style="color:var(--muted); font-size:12px;">Sınır (bu mesafenin %50'sinde acil, %80'inde kritik alarm çalar):</span>
+      <input type="number" id="detailThreshold" min="10" max="5000" style="width:90px;"/>
+      <span style="color:var(--muted); font-size:12px;">metre</span>
+      <button onclick="saveDetailThreshold()">Kaydet</button>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; color:var(--text2);">
+        <input type="checkbox" id="detailTrackedCanSeeLoc" onchange="toggleTrackedCanSeeLocation(this.checked)"/>
+        Uzaklaştırılan, korunanın konumunu haritada görebilsin
+      </label>
+    </div>
+    <small class="hint">Varsayılan olarak kapalıdır — uzaklaştırılan taraf yalnızca mesafe eşiği aşıldığında alarm alır, korunanın konumunu haritada göremez. Bunu yalnızca gerçek bir istisnai gereksinim varsa aç.</small>
+    <div class="row" style="margin-top:8px;">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; color:var(--text2);">
+        <input type="checkbox" id="detailTrackedCanSeeZones" onchange="toggleTrackedCanSeeZones(this.checked)"/>
+        Uzaklaştırılan, yasak bölgeleri ve güzergahları haritada görebilsin
+      </label>
+    </div>
+    <small class="hint">Varsayılan olarak kapalıdır — uzaklaştırılan taraf bölgelere/güzergahlara yaklaşınca yine uyarı alır, ama haritada nerede olduklarını göremez. Bunu yalnızca gerçek bir istisnai gereksinim varsa aç.</small>
+    <div id="detailReq"></div>
+
+    <div class="row" style="justify-content:space-between; margin-top:20px;">
+      <h2 style="margin:0;">Yasak Bölgeler &amp; Yol Güzergahları</h2>
+      <button class="secondary" onclick="openZonePicker()">+ Bölge / Yol Ekle</button>
+    </div>
+    <small class="hint" style="margin-bottom:8px;">Açılan pencerede "⭕ Nokta (Daire)" ile yasak bölge, "🛣️ Yol (Koridor)" ile korunanın düzenli kullandığı bir güzergah (iş/okul yolu vb.) ekleyebilirsin.</small>
+    <div id="zoneList"></div>
+
+    <h2 style="margin-top:20px;">Acil Durum Kişileri</h2>
+    <small class="hint" style="margin-bottom:8px;">Panik butonuna basıldığında e-postası olan kişilere taslak açılır. "Yakın" kişiler kısa bir bildirim, "Yetkili/Polis" olarak işaretlenenler ise daha resmi, ayrıntılı bir metin alır (SMS devre dışı).</small>
+    <div id="contactRequestsList"></div>
+    <div id="contactList"></div>
+    <div class="row" style="margin-top:10px;">
+      <input type="text" id="ecName" placeholder="İsim" style="flex:1;"/>
+      <input type="text" id="ecPhone" placeholder="Telefon (opsiyonel)" style="width:140px;"/>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input type="email" id="ecEmail" placeholder="E-posta" style="flex:1;"/>
+      <select id="ecType" style="width:150px;">
+        <option value="family">👤 Yakın</option>
+        <option value="authority">🚓 Yetkili / Polis</option>
+      </select>
+      <button onclick="addEmergencyContact()">+ Ekle</button>
+    </div>
+
+    <h2 style="margin-top:20px;">📧 E-posta Uyarı Ayarları</h2>
+    <small class="hint" style="margin-bottom:8px;">Hangi durumlarda acil durum kişilerine (e-postası olanlara) otomatik mail gitsin? Bu sadece e-posta içindir — panik butonu, admin panel bildirimleri ve telefondaki uyarılar bundan etkilenmez.</small>
+    <div id="emailAlertTypesList"></div>
+
+    <div class="row" style="justify-content:space-between; margin-top:20px;">
+      <h2 style="margin:0;">Önceki Uyarılar</h2>
+      <button class="secondary" onclick="exportPdf()">📄 PDF İndir</button>
+    </div>
+    <div id="detailHistory" class="empty">Yükleniyor…</div>
+    </div>
+</div>
+</main>
+</div>
+
+<div id="zonePickerOverlay">
+  <div id="zonePickerBox">
+    <div class="row" style="justify-content:space-between;">
+      <div style="font-weight:700; font-size:15px;">🚫 Bölge Seç</div>
+      <button class="detail-close" onclick="closeZonePicker()">Kapat ✕</button>
+    </div>
+    <div class="row" style="margin-top:10px; gap:6px;">
+      <button type="button" id="zoneModeBtn_circle" onclick="setZoneMode('circle')">⭕ Nokta (Daire)</button>
+      <button type="button" class="secondary" id="zoneModeBtn_route" onclick="setZoneMode('route')">🛣️ Yol (Koridor)</button>
+    </div>
+    <small class="hint" id="zonePickerHint">Eklemek istediğin noktaya haritada tıkla, sonra ad ve yarıçap gir.</small>
+    <div id="zonePickerMap"></div>
+    <div class="row" id="zoneRouteControls" style="margin-top:8px; display:none;">
+      <span style="color:var(--muted); font-size:12px;" id="zoneRoutePointCount">0 nokta</span>
+      <button type="button" class="secondary" onclick="undoRoutePoint()">↩️ Son Noktayı Sil</button>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <input type="text" id="zoneLabel" placeholder="Ad (örn. Ev / İş Yolu)" style="flex:1;"/>
+      <input type="number" id="zoneRadius" placeholder="Yarıçap (m)" value="100" style="width:120px;"/>
+    </div>
+    <small class="hint" id="zoneRadiusHint">Çok dar bir yarıçap (ör. 10-20m) telefonun GPS sapmasıyla yanlış alarm üretebilir ve daha sık kontrol gerektirdiği için pili daha çok tüketir. En az 100m öneririz.</small>
+    <div class="row" style="margin-top:10px; justify-content:flex-end;">
+      <button class="secondary" onclick="closeZonePicker()">İptal</button>
+      <button class="safe" id="zoneSaveBtn" onclick="confirmAddZone()" disabled>Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<div id="msgOverlay">
+  <div id="msgBox">
+    <div class="row" style="justify-content:space-between;">
+      <div style="font-weight:700; font-size:15px;">💬 Mesaj Gönder</div>
+      <button class="detail-close" onclick="closeMsgModal()">Kapat ✕</button>
+    </div>
+    <div id="msgTargetLabel" style="color:var(--muted); font-size:12.5px; margin:6px 0 12px;"></div>
+    <select id="msgTemplate" onchange="applyMsgTemplate()" style="width:100%; margin-bottom:10px;">
+      <option value="">Standart mesaj seç…</option>
+      <option value="🔋 Şarjın bitiyor, lütfen telefonunu şarja tak.">🔋 Şarjın bitiyor</option>
+      <option value="📍 Nerede olduğunu bildirir misin?">📍 Konum bildir</option>
+      <option value="⚠️ Lütfen dikkatli ol.">⚠️ Dikkatli ol</option>
+      <option value="✅ İyi misin, her şey yolunda mı?">✅ İyi misin?</option>
+      <option value="__custom">✏️ Özel mesaj yaz…</option>
+    </select>
+    <textarea id="msgText" rows="3" placeholder="Mesaj metni…"></textarea>
+    <div class="row" style="margin-top:12px; justify-content:flex-end;">
+      <button class="secondary" onclick="closeMsgModal()">İptal</button>
+      <button onclick="sendAdminMsg()">Gönder</button>
+    </div>
+    <div id="msgStatus" style="font-size:12px; color:var(--muted); margin-top:8px;"></div>
+  </div>
+</div>
+
+<script>
+const DB_URL = 'https://uyari-f25c4-default-rtdb.europe-west1.firebasedatabase.app';
+const ADMIN_PASSWORD = 'uzakdur2026'; // İstersen bu satırı değiştirip kendi şifreni koy.
+// "Konum iste" butonunun uygulama tamamen kapalıyken/servis durmuşken de
+// çalışabilmesi için Google Apps Script Web App URL'i (FCM push gönderir).
+// Boş bırakılırsa bu adım sessizce atlanır, buton yine de RTDB bayrağını
+// yazar (yalnızca servis zaten çalışıyorsa işe yarar).
+const APPS_SCRIPT_WAKE_URL = 'https://script.google.com/macros/s/AKfycbz7Fx1gXAcNhI3D6UuN2CdKSXdetYP_A5MbPi_85neUb9KH_4ZX0L0TjQrwpaFI3Iam9g/exec';
+
+// Panel tamamen kapalıyken (sekme/tarayıcı kapalı) de bildirim alabilmek
+// için: bu config sw.js'teki ile aynı olmalı (orada da elle yazılı, çünkü
+// service worker bu <script> bloğunu import edemiyor).
+const FIREBASE_WEB_CONFIG = {
+  apiKey: 'AIzaSyCy-CSxZGg4AJb_nNZlSLvQ2-56v7ETg2I',
+  authDomain: 'uyari-f25c4.firebaseapp.com',
+  databaseURL: DB_URL,
+  projectId: 'uyari-f25c4',
+  storageBucket: 'uyari-f25c4.firebasestorage.app',
+  messagingSenderId: '93986217590',
+  appId: '1:93986217590:web:d5c1b676b09599ed92c957',
+};
+const FIREBASE_VAPID_KEY = 'BKCE7MGdSD1DN-XwARFPiT4rOm6M-jADqNbE1lLKsfD0pG83g8NEPhsPAf3uuj7eZ2oBjQbdXbGF5jaf4L0kfqw';
+firebase.initializeApp(FIREBASE_WEB_CONFIG);
+
+const ROLE_LABEL = { protected: 'Korunan', tracked: 'Uzaklaştırılan' };
+const EVENT_LABEL = { proximity: 'Yaklaşma', zone: 'Yasak bölge', panic: 'PANİK', tamper: 'Şüpheli çevrimdışı' };
+
+function tryLogin() {
+  const val = document.getElementById('pw').value;
+  if (val === ADMIN_PASSWORD) {
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    boot();
+  } else {
+    document.getElementById('pwErr').textContent = 'Hatalı şifre';
+  }
+}
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+
+function genId() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let i = 0; i < 12; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+async function fetchJSON(path) {
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const r = await fetch(`${DB_URL}/${path}.json`, { signal: ctrl.signal });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status} ${path}: ${body || r.statusText}`);
+    }
+    return await r.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`Zaman aşımı (10sn): ${path} yanıt vermedi.`);
+    throw new Error(`Ağ hatası (${path}): ${e.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+async function writeRequest(path, method, data) {
+  const r = await fetch(`${DB_URL}/${path}.json`, { method, body: data !== undefined ? JSON.stringify(data) : undefined });
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error(`Kaydedilemedi (${method} ${path}): HTTP ${r.status} — ${body || r.statusText}`);
+  }
+  return r;
+}
+async function patchJSON(path, data) { return writeRequest(path, 'PATCH', data); }
+async function putJSON(path, data) { return writeRequest(path, 'PUT', data); }
+async function deletePath(path) { return writeRequest(path, 'DELETE'); }
+async function pushJSON(path, data) { return writeRequest(path, 'POST', data); }
+function logEvent(pairId, type, extra) {
+  return pushJSON(`alarm_log/${pairId}`, Object.assign({ byDeviceId: 'admin', distance: 0, type, ts: Date.now() }, extra || {}));
+}
+
+// Bir yerlerde 'undefined'/boş bir deviceId ile çağrılırsa, patchJSON bunu
+// gerçek bir cihazmış gibi devices/undefined altında YENİ bir düğüm olarak
+// yazıp admin panelde hayalet bir "cihaz" kartı oluşturuyordu — bunu daha
+// kaynağında kesiyoruz.
+function isValidDeviceId(id) {
+  return !!id && id !== 'undefined' && id !== 'null';
+}
+
+let msgTargetDeviceId = null;
+function openMsgModal(deviceId, deviceName) {
+  if (!isValidDeviceId(deviceId)) return;
+  msgTargetDeviceId = deviceId;
+  document.getElementById('msgTargetLabel').textContent = 'Alıcı: ' + (deviceName || '—');
+  document.getElementById('msgTemplate').value = '';
+  document.getElementById('msgText').value = '';
+  document.getElementById('msgStatus').textContent = '';
+  document.getElementById('msgOverlay').style.display = 'flex';
+}
+function closeMsgModal() {
+  document.getElementById('msgOverlay').style.display = 'none';
+  msgTargetDeviceId = null;
+}
+function applyMsgTemplate() {
+  const sel = document.getElementById('msgTemplate');
+  const box = document.getElementById('msgText');
+  if (sel.value === '__custom') { box.value = ''; box.focus(); }
+  else if (sel.value) { box.value = sel.value; }
+}
+async function sendAdminMsg() {
+  const text = document.getElementById('msgText').value.trim();
+  const statusEl = document.getElementById('msgStatus');
+  if (!isValidDeviceId(msgTargetDeviceId)) return;
+  if (!text) { statusEl.textContent = 'Önce bir mesaj yaz veya seç.'; return; }
+  statusEl.textContent = 'Gönderiliyor…';
+  try {
+    await patchJSON(`devices/${msgTargetDeviceId}/adminMsg`, { text, ts: { '.sv': 'timestamp' } });
+    // "Gönderildi" iletildiği anlamına gelmiyor — Firebase'e yazıldı demek,
+    // telefonun bunu görüp göreceği ayrı bir konu. Gerçek teslim durumu
+    // (✅ iletildi / ⏳ bekleniyor / ❌ yanıt yok) 💬 ikonunun yanındaki
+    // renkli noktadan takip edilebilir.
+    statusEl.textContent = '📤 Kaydedildi — iletilip iletilmediğini 💬 ikonunun yanındaki noktadan takip et.';
+    setTimeout(closeMsgModal, 2200);
+  } catch (e) {
+    statusEl.textContent = '❌ ' + e.message;
+  }
+}
+
+// İki yol birden denenir: (1) devices/{id}/locationRequest bayrağı — servis
+// zaten arka planda çalışıyorsa birkaç saniye içinde yakalanıp taze konum
+// yazılır; (2) Apps Script üzerinden FCM "sessiz" push — uygulama tamamen
+// kapanmış/öldürülmüş olsa bile OS'u uyandırıp konum almayı dener (garantili
+// değil, OEM pil yönetimi engelleyebilir, ama tek gerçek uyandırma yolu budur).
+async function requestLocationNow(deviceId) {
+  if (!isValidDeviceId(deviceId)) return;
+  try {
+    await patchJSON(`devices/${deviceId}/locationRequest`, { ts: { '.sv': 'timestamp' } });
+  } catch (e) {
+    alert('Konum isteği gönderilemedi: ' + e.message);
+    return;
+  }
+  if (APPS_SCRIPT_WAKE_URL) {
+    try {
+      await fetch(`${APPS_SCRIPT_WAKE_URL}?deviceId=${encodeURIComponent(deviceId)}`, { mode: 'no-cors' });
+    } catch (_) { /* sessiz push en iyi çaba (best-effort); RTDB bayrağı zaten yazıldı */ }
+  }
+}
+
+let devices = {}, pairs = {}, locations = {}, alarmLogAll = {};
+let detailMapObj = null, detailMarkers = [], detailCircle = null, detailCautionCircle = null, detailSinirCircle = null, detailZoneLayers = [], openPairId = null, detailMapFitted = false;
+let zonePickerMapObj = null, zonePickerMarker = null, zonePickerLatLng = null;
+let zonePickerMode = 'circle'; // 'circle' | 'route'
+let routePoints = [], routePolyline = null, routePointMarkers = [];
+let notifEnabled = false, lastSeenTs = Date.now(), firstRefresh = true, firstLoadChecked = false;
+let prevOnline = {};
+let prevBatteryTier = {};
+let prevUninstallTs = {};
+let uninstallCheckInitialized = false;
+
+function isOnline(d) {
+  return d.online === true && d.ts && (Date.now() - d.ts) < 30000;
+}
+
+// "Çevrimiçi" durumu uygulama EKRANI açıkken de beslenebiliyor (kendi ayrı
+// zamanlayıcısı var) — bu, arka plan servisinin (mesaj/konum isteğini
+// işleyen kod) gerçekten çalıştığını KANITLAMAZ. serviceTick SADECE arka
+// plan servisinin kendi isolate'inden yazılıyor; bu yüzden ekran kapalıyken
+// de "servis gerçekten tick atıyor mu" sorusuna ayrı, güvenilir bir cevap.
+function serviceAlive(d) {
+  return d.serviceTick && (Date.now() - d.serviceTick) < 15000;
+}
+function serviceBadge(d) {
+  const alive = serviceAlive(d);
+  const color = alive ? 'var(--safe)' : 'var(--danger)';
+  const label = alive ? 'Servis çalışıyor' : 'Servis DURMUŞ';
+  const title = alive ? '' : 'title="Arka plan servisi tick atmıyor — telefon OS\'u öldürmüş olabilir (pil kısıtlaması ayarlanmamış)."';
+  return `<span style="color:${color}; font-weight:700;" ${title}>⚙ ${label}</span>`;
+}
+
+const MAX_PARTNERS = 4;
+
+// Bir cihazın hangi eşleşmelerde yer aldığını doğrudan pairs koleksiyonundan
+// çıkarır — devices altında ayrı bir pairId referansı tutulmaz, böylece
+// senkron dışı kalabilecek bir kopya veri hiç oluşmaz.
+function pairIdsForDevice(deviceId) {
+  return Object.keys(pairs).filter(pid =>
+    pairs[pid].protectedDeviceId === deviceId || pairs[pid].trackedDeviceId === deviceId
+  );
+}
+
+function partnerNames(deviceId) {
+  return pairIdsForDevice(deviceId).map(pid => {
+    const p = pairs[pid];
+    const otherId = p.protectedDeviceId === deviceId ? p.trackedDeviceId : p.protectedDeviceId;
+    return devices[otherId]?.name || '(silinmiş cihaz)';
+  });
+}
+
+function validPairIds() {
+  return Object.keys(pairs).filter(pid =>
+    devices[pairs[pid].protectedDeviceId] && devices[pairs[pid].trackedDeviceId]
+  );
+}
+
+function isValidLogEntry(e) {
+  return !!e && typeof e === 'object' && typeof e.ts === 'number';
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Yasak bölgeler ve acil durum kişileri artık pair'e değil korunan cihaza
+// bağlıdır (eşleşme silinip yeniden kurulunca kaybolmasın diye).
+function deviceZones(protectedDeviceId) {
+  return (devices[protectedDeviceId] && devices[protectedDeviceId].zones) || {};
+}
+function deviceContacts(protectedDeviceId) {
+  return (devices[protectedDeviceId] && devices[protectedDeviceId].emergencyContacts) || {};
+}
+function deviceContactRequests(protectedDeviceId) {
+  return (devices[protectedDeviceId] && devices[protectedDeviceId].contactRequests) || {};
+}
+
+function trackedInAnyZone(pair, trackedLoc) {
+  if (!trackedLoc) return null;
+  const zones = deviceZones(pair.protectedDeviceId);
+  for (const [zid, z] of Object.entries(zones)) {
+    if (haversine(trackedLoc.lat, trackedLoc.lon, z.lat, z.lon) < z.radius) return z;
+  }
+  return null;
+}
+
+function todayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function timeAgo(ts) {
+  if (!ts) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return 'az önce';
+  if (s < 3600) return Math.floor(s / 60) + ' dk önce';
+  if (s < 86400) return Math.floor(s / 3600) + ' sa önce';
+  return Math.floor(s / 86400) + ' gün önce';
+}
+
+// Live severity for a pair, computed the same way telefon uygulaması hesaplıyor —
+// eşiğin (pair.threshold) yüzdesine göre üç kademe: mesafe eşiğin %50'sinin
+// altındaysa ACİL (tam alarm/siren), %50-%80 arasıysa KRİTİK, %80-%100
+// arasıysa SINIR (yeni girildi). 1000m gibi sabit bir mesafe artık yok —
+// sınır tamamen eşiğe (admin/telefon tarafından ayarlanan) oranla belirleniyor.
+// Panik sonrası kısa bir "grace" penceresi de var ki mesafe aniden güvenli
+// okusa bile ACİL durumdan hemen çıkmasın.
+function pairStatus(pairId) {
+  const p = pairs[pairId];
+  const pLoc = locations[p.protectedDeviceId];
+  const tLoc = locations[p.trackedDeviceId];
+  const distance = (pLoc && tLoc) ? haversine(pLoc.lat, pLoc.lon, tLoc.lat, tLoc.lon) : null;
+  const zone = trackedInAnyZone(p, tLoc);
+  const events = (alarmLogAll[pairId] ? Object.values(alarmLogAll[pairId]).filter(isValidLogEntry) : []);
+  const lastEvent = events.sort((a, b) => b.ts - a.ts)[0] || null;
+  const recentPanic = events.some(e => e.type === 'panic' && Date.now() - e.ts < 5 * 60000);
+  const ratio = (distance !== null && p.threshold > 0) ? distance / p.threshold : null;
+
+  let status = 'unknown';
+  if (recentPanic || zone || (ratio !== null && ratio <= 0.5)) status = 'acil';
+  else if (ratio !== null && ratio <= 0.8) status = 'kritik';
+  else if (ratio !== null && ratio <= 1.0) status = 'sinir';
+  else if (distance !== null) status = 'safe';
+
+  return { status, distance, zone, lastEvent, pLoc, tLoc };
+}
+
+const STATUS_ORDER = { acil: 0, kritik: 1, sinir: 2, safe: 3, unknown: 4 };
+const STATUS_LABEL = { acil: 'ACİL', kritik: 'KRİTİK', sinir: 'SINIR', safe: 'GÜVENLİ', unknown: 'BİLİNMİYOR' };
+
+function flatEvents() {
+  const out = [];
+  for (const pid of Object.keys(alarmLogAll)) {
+    const entries = alarmLogAll[pid];
+    // Skips legacy pre-pairing alarm_log entries (written flat at the root
+    // before the pairId/entryId nesting existed) — those show up here as a
+    // leaf object whose "children" are just field values, not real entries.
+    if (!entries || typeof entries !== 'object') continue;
+    for (const id of Object.keys(entries)) {
+      const e = entries[id];
+      if (!isValidLogEntry(e)) continue;
+      out.push(Object.assign({ pairId: pid, id }, e));
+    }
+  }
+  out.sort((a, b) => b.ts - a.ts);
+  return out;
+}
+
+function pairLabel(pairId) {
+  const p = pairs[pairId];
+  if (!p) return '(silinmiş eşleşme)';
+  const pName = devices[p.protectedDeviceId]?.name || '?';
+  const tName = devices[p.trackedDeviceId]?.name || '?';
+  return `${pName} ⇄ ${tName}`;
+}
+
+// Eşleşme silindikten sonra da Canlı Akış'ta kimin kiminle olduğu görünsün
+// diye, o olayı yazarken isimler doğrudan olay kaydına gömülür; pair
+// silinince pairLabel() artık bulamaz, burada o gömülü isimlere düşülür.
+function eventPairLabel(e) {
+  if (pairs[e.pairId]) return pairLabel(e.pairId);
+  if (e.pName || e.tName) return `${e.pName || '?'} ⇄ ${e.tName || '?'}`;
+  return '(silinmiş eşleşme)';
+}
+
+function eventLine(e) {
+  const type = e.type || 'proximity';
+  const roleLabel = e.role === 'tracked' ? '🎯 Uzaklaştırılan' : e.role === 'protected' ? '🛡️ Korunan' : 'Cihaz';
+  if (type === 'panic') return `PANİK sinyali`;
+  if (type === 'emergency_confirmed') return `🆘 "İyi misin?" sorusuna "evet" dedi — acil durum bilgilendirmesi istendi`;
+  if (type === 'uninstall_attempt') return `🚨 ${e.deviceName || 'Cihaz'} — silme girişimi (cihaz yöneticisi izni kapatıldı)`;
+  if (type === 'zone') return `Yasak bölgeye girdi: ${e.zoneLabel || ''}`;
+  if (type === 'tamper') return `beklenmedik şekilde çevrimdışı oldu`;
+  if (type === 'pair_removed') return `Eşleşme sonlandırıldı`;
+  if (type === 'pair_created') return e.isRepair ? `Eşleşme yeniden kuruldu (geçmiş korunuyor)` : `Eşleşme oluşturuldu`;
+  // Uzaklaştırılan tarafın pili bitmesi takibin tamamen kesilmesi demektir —
+  // bu yüzden o taraf için daha vurgulu bir metin gösteriliyor.
+  if (type === 'battery_critical') return `${roleLabel} pili kritik seviyede (%${e.battery})${e.role === 'tracked' ? ' — TAKİP KESİLEBİLİR!' : ''}`;
+  if (type === 'battery_low') return `${roleLabel} pili azalıyor (%${e.battery})${e.role === 'tracked' ? ' — takip riske girebilir' : ''}`;
+  if (type === 'kritik') return e.zoneLabel ? `"${e.zoneLabel}" güzergahına kritik yaklaşma` : `Kritik seviyede yaklaşma (${e.distance}m)`;
+  if (type === 'sinir') return e.zoneLabel ? `"${e.zoneLabel}" güzergahına yaklaştı` : `Sınır içine girildi (${e.distance}m)`;
+  return `${e.distance}m mesafeye yaklaştı`;
+}
+
+// Canlı Akış'ı Acil/Önemli/Normal olarak gruplamak için: bir alarm_log
+// kaydı zaten SADECE gerçek bir alarm çaldığında yazılıyor (panik, yasak
+// bölge ihlali ya da eşiğin altına inme) — yani "proximity" tipi dahil
+// hepsi gerçekten alarmın öttüğü anlar, hiçbiri "normal" değil. Beklenmedik
+// çevrimdışı kalma ve eşleşme sonlandırma idari ama takip edilmesi gereken
+// olaylar olduğu için "önemli" kalıyor. Kritik/sınır kademe geçişleri de
+// artık kaydediliyor (tam alarm değiller) — kritik "önemli", sınır (en
+// hafif kademe) "normal" olarak sınıflanıyor.
+function feedSeverity(e) {
+  const type = e.type || 'proximity';
+  if (type === 'kritik') return 'important';
+  if (type === 'sinir' || type === 'pair_created') return 'normal';
+  if (type === 'tamper' || type === 'pair_removed' || type === 'battery_low') return 'important';
+  return 'urgent';
+}
+
+const MAIN_TABS = ['ops', 'devices', 'requests'];
+
+function showMainTab(name) {
+  // Sidebar navigasyonu artık vaka detayı açıkken de görünür kalıyor;
+  // bir sekmeye tıklamak her zaman panele dönsün.
+  document.getElementById('caseView').classList.add('hidden');
+  document.getElementById('dashboardView').classList.remove('hidden');
+  MAIN_TABS.forEach(t => {
+    document.getElementById(`tabPanel_${t}`).classList.toggle('hidden', t !== name);
+    document.getElementById(`mainTab_${t}`).classList.toggle('active', t === name);
+  });
+  localStorage.setItem('uzakdur_admin_tab', name);
+  // Harita, gizliyken oluşturulmuşsa Leaflet boyutu yanlış hesaplayabilir;
+  // Operasyon sekmesine her geçişte düzeltilsin.
+  if (name === 'ops' && allCasesMapObj) setTimeout(() => allCasesMapObj.invalidateSize(), 0);
+}
+
+function updateRequestsDot() {
+  const resetCount = Object.keys(devices).filter(id => devices[id].passwordResetRequest).length;
+  const contactCount = Object.keys(devices).reduce((sum, id) => sum + Object.keys(deviceContactRequests(id)).length, 0);
+  const total = resetCount + contactCount;
+  const dot = document.getElementById('requestsDot');
+  dot.textContent = total;
+  dot.classList.toggle('hidden', total === 0);
+}
+
+let liveFeedTab = null;
+
+function toggleLiveFeedTab(sev) {
+  liveFeedTab = liveFeedTab === sev ? null : sev;
+  renderLiveFeed();
+}
+
+function renderLiveFeed() {
+  const dateInput = document.getElementById('feedDate');
+  if (dateInput && !dateInput.value) dateInput.value = todayDateStr();
+  const [y, m, d] = (dateInput?.value || todayDateStr()).split('-').map(Number);
+  const dayStart = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+
+  const feed = flatEvents().filter(e => e.ts >= dayStart && e.ts < dayEnd);
+  const groups = { urgent: [], important: [], normal: [] };
+  feed.forEach(e => groups[feedSeverity(e)].push(e));
+  ['urgent', 'important', 'normal'].forEach(sev => {
+    document.getElementById(`feedCnt_${sev}`).textContent = groups[sev].length;
+    document.getElementById(`feedTab_${sev}`).classList.toggle('active', liveFeedTab === sev);
+  });
+
+  const panel = document.getElementById('liveFeedPanel');
+  const feedEl = document.getElementById('liveFeed');
+  if (!liveFeedTab) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const rows = groups[liveFeedTab].slice(0, 200);
+  feedEl.innerHTML = rows.length ? rows.map(e => {
+    const type = e.type || 'proximity';
+    const badge = type === 'panic' ? '<span class="badge panic">PANİK</span>' : '';
+    return `<div class="feed-row">
+      <span>${badge} <b>${escapeHtml(eventPairLabel(e))}</b> — ${escapeHtml(eventLine(e))}</span>
+      <span style="color:var(--muted); white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('tr-TR')}</span>
+    </div>`;
+  }).join('') : '<div class="empty">Bu kategoride olay yok.</div>';
+}
+
+// "Gönderildi" ile "telefona gerçekten ulaştı" farklı şeyler — admin panel
+// bunu şimdiye kadar hiç ayırt edemiyordu. Uygulama isteği işleyince
+// devices/{id}/{field}/ackTs yazıyor; burada gönderim zamanıyla karşılaştırıp
+// ✅ iletildi / ⏳ bekleniyor / ❌ yanıt yok olarak gösteriyoruz.
+function ackDot(devId, field) {
+  const node = devices[devId]?.[field];
+  if (!node || !node.ts) return '';
+  const acked = node.ackTs && node.ackTs >= node.ts;
+  if (acked) return `<span class="ack-dot ack-ok" title="İletildi (${escapeHtml(timeAgo(node.ackTs))})"></span>`;
+  const ageMs = Date.now() - node.ts;
+  if (ageMs < 90000) return `<span class="ack-dot ack-pending" title="Gönderildi, telefondan yanıt bekleniyor…"></span>`;
+  return `<span class="ack-dot ack-fail" title="Telefon yanıt vermedi — uygulama arka planda çalışmıyor olabilir (pil kısıtlaması, eski build, kapalı uygulama)."></span>`;
+}
+
+// Bir cihaz satırı: isim/çevrimiçi noktası + pil/konum bilgisi + net
+// etiketli eylem butonları (💬 Mesaj / 📍 Konum / 📞 Ara). Önceden bunlar
+// metnin ucuna sıkışmış çıplak ikonlardı, ayırt etmesi zordu.
+function deviceActionRow(icon, roleLabel, dev, devId, loc) {
+  const batt = typeof dev.battery === 'number' ? dev.battery : null;
+  const battClass = batt !== null && batt <= 30 ? 'batt low' : 'batt';
+  const nameSafe = escapeHtml(dev.name || '').replace(/'/g, "\\'");
+  const callBtn = (batt !== null && batt <= 30 && dev.phone)
+    ? `<a href="tel:${escapeHtml(dev.phone)}" class="action-btn" onclick="event.stopPropagation()" title="${escapeHtml(dev.phone)}">📞 Ara</a>` : '';
+  const roleClass = icon === '🛡️' ? 'role-protected' : 'role-tracked';
+  const initials = (dev.name || roleLabel).trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  return `
+    <div class="device-row">
+      <div class="device-info">
+        <div class="device-avatar ${roleClass}" title="${icon} ${escapeHtml(roleLabel)}">${initials}</div>
+        <div class="device-info-text">
+          <div class="device-name">${escapeHtml(dev.name || roleLabel)}<span class="dot ${isOnline(dev) ? 'on' : 'off'}"></span></div>
+          <div class="device-meta">
+            <span class="${battClass}">🔋 ${batt !== null ? batt + '%' : '—'}</span>
+            <span>${loc?.ts ? '📍 ' + escapeHtml(timeAgo(loc.ts)) : '📍 konum yok'}</span>
+            ${serviceBadge(dev)}
+          </div>
+        </div>
+      </div>
+      <div class="device-actions">
+        <a href="javascript:void(0)" class="action-btn" onclick="event.stopPropagation(); openMsgModal('${devId}','${nameSafe}')">💬 Mesaj${ackDot(devId, 'adminMsg')}</a>
+        <a href="javascript:void(0)" class="action-btn" onclick="event.stopPropagation(); requestLocationNow('${devId}')">📍 Konum${ackDot(devId, 'locationRequest')}</a>
+        ${callBtn}
+      </div>
+    </div>`;
+}
+
+function renderOpsBoard(pairIds) {
+  const container = document.getElementById('opsBody');
+  const q = (document.getElementById('opsSearch')?.value || '').trim().toLowerCase();
+
+  let rows = pairIds.map(pid => Object.assign({ pairId: pid, label: pairLabel(pid) }, pairStatus(pid)));
+  if (q) rows = rows.filter(r => r.label.toLowerCase().includes(q));
+  rows.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (b.lastEvent?.ts || 0) - (a.lastEvent?.ts || 0));
+
+  if (rows.length === 0) {
+    container.innerHTML = `<div class="empty">${q ? 'Eşleşme bulunamadı.' : 'Henüz eşleştirme yok.'}</div>`;
+    return;
+  }
+
+  container.innerHTML = rows.map(r => {
+    const p = pairs[r.pairId];
+    const pDev = devices[p.protectedDeviceId] || {};
+    const tDev = devices[p.trackedDeviceId] || {};
+    const distText = r.status === 'acil' && r.zone ? `🚫 ${escapeHtml(r.zone.label)}`
+      : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> — acil ${Math.round(p.threshold * 0.5)}m / kritik ${Math.round(p.threshold * 0.8)}m / sınır ${p.threshold}m`
+      : 'Mesafe bilinmiyor';
+    return `<div class="pair-card" onclick="openDetail('${r.pairId}')">
+      <div class="pair-card-head">
+        <div class="pair-card-status"><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></div>
+        <div class="pair-card-dist">${distText}</div>
+      </div>
+      <div class="pair-card-title">${escapeHtml(r.label)}</div>
+      <div class="pair-card-sub">Son olay: ${r.lastEvent ? escapeHtml(timeAgo(r.lastEvent.ts)) : '—'}</div>
+      ${deviceActionRow('🛡️', 'Korunan', pDev, p.protectedDeviceId, r.pLoc)}
+      ${deviceActionRow('🎯', 'Uzaklaştırılan', tDev, p.trackedDeviceId, r.tLoc)}
+    </div>`;
+  }).join('');
+}
+
+let allCasesMapObj = null, allCasesLayers = [], allCasesMapFitted = false;
+function renderAllCasesMap(pairIds) {
+  const el = document.getElementById('allCasesMap');
+  if (typeof L === 'undefined') {
+    if (!el.dataset.errShown) { el.innerHTML = '<div class="empty" style="padding:16px;">Harita yüklenemedi.</div>'; el.dataset.errShown = '1'; }
+    return;
+  }
+  if (!allCasesMapObj) {
+    allCasesMapObj = L.map('allCasesMap', { zoomControl: true, attributionControl: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(allCasesMapObj);
+    setTimeout(() => allCasesMapObj.invalidateSize(), 50);
+  }
+  allCasesLayers.forEach(l => allCasesMapObj.removeLayer(l));
+  allCasesLayers = [];
+
+  const colorFor = { acil: '#EF4444', kritik: '#F59E0B', sinir: '#3B82F6', safe: '#22C55E', unknown: '#6B7686' };
+  const GREEN = '#22C55E', RED = '#EF4444';
+  const pts = [];
+  pairIds.forEach((pid, idx) => {
+    const st = pairStatus(pid);
+    const lineColor = colorFor[st.status];
+    const p = pairs[pid];
+    const n = idx + 1;
+    const pName = devices[p.protectedDeviceId]?.name || 'Korunan';
+    const tName = devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan';
+    if (st.pLoc) {
+      const m = L.circleMarker([st.pLoc.lat, st.pLoc.lon], { radius: 7, color: GREEN, fillColor: GREEN, fillOpacity: .9, weight: 2 })
+        .addTo(allCasesMapObj).bindPopup('🛡️ ' + escapeHtml(pName))
+        .bindTooltip(`${n}-Korunan ${escapeHtml(pName)}`, { permanent: true, direction: 'top', offset: [0, -6], className: 'map-label protected' });
+      allCasesLayers.push(m);
+      pts.push([st.pLoc.lat, st.pLoc.lon]);
+      // Sınır (acil/kritik/sınır) çemberleri artık vaka detayına girmeden
+      // tüm vakalar haritasında da görünüyor.
+      if (p.threshold > 0) {
+        const acil = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold * 0.5, color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.05, weight: 1 }).addTo(allCasesMapObj);
+        const kritik = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold * 0.8, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.03, weight: 1, dashArray: '4,4' }).addTo(allCasesMapObj);
+        const sinir = L.circle([st.pLoc.lat, st.pLoc.lon], { radius: p.threshold, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.02, weight: 1, dashArray: '2,6' }).addTo(allCasesMapObj);
+        allCasesLayers.push(acil, kritik, sinir);
+      }
+      // Yasak bölgeler (daire) ve korunanın güzergahları (rota) da tüm
+      // vakalar haritasında görünür — detaya girmeden genel resim.
+      for (const [zid, z] of Object.entries(deviceZones(p.protectedDeviceId))) {
+        if (z.type === 'route' && Array.isArray(z.points) && z.points.length >= 2) {
+          const line = L.polyline(z.points.map(pt => [pt.lat, pt.lon]), { color: '#3B82F6', weight: 4, opacity: .55, dashArray: '8,6' })
+            .addTo(allCasesMapObj).bindPopup(`🛣️ ${escapeHtml(z.label)}`);
+          allCasesLayers.push(line);
+        } else {
+          const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.15, weight: 1, dashArray: '6,5' })
+            .addTo(allCasesMapObj).bindPopup(`🚫 ${escapeHtml(z.label)}`);
+          allCasesLayers.push(c);
+        }
+      }
+    }
+    if (st.tLoc) {
+      const m = L.circleMarker([st.tLoc.lat, st.tLoc.lon], { radius: 7, color: RED, fillColor: RED, fillOpacity: .9, weight: 2 })
+        .addTo(allCasesMapObj).bindPopup('🎯 ' + escapeHtml(tName) + ' — ' + STATUS_LABEL[st.status])
+        .bindTooltip(`${n}-Uzaklaştırılan ${escapeHtml(tName)}`, { permanent: true, direction: 'top', offset: [0, -6], className: 'map-label tracked' });
+      allCasesLayers.push(m);
+      pts.push([st.tLoc.lat, st.tLoc.lon]);
+    }
+    if (st.pLoc && st.tLoc) {
+      const line = L.polyline([[st.pLoc.lat, st.pLoc.lon], [st.tLoc.lat, st.tLoc.lon]], { color: lineColor, weight: 2, dashArray: '5,5', opacity: .7 }).addTo(allCasesMapObj);
+      allCasesLayers.push(line);
+    }
+  });
+  if (!allCasesMapFitted) {
+    if (pts.length >= 2) allCasesMapObj.fitBounds(pts, { padding: [30, 30] });
+    else if (pts.length === 1) allCasesMapObj.setView(pts[0], 14);
+    else allCasesMapObj.setView([41.0082, 28.9784], 6);
+    if (pts.length > 0) allCasesMapFitted = true;
+  }
+}
+
+function render() {
+  const ids = Object.keys(devices);
+  const onlineCount = ids.filter(id => isOnline(devices[id])).length;
+  const pairIds = validPairIds();
+  document.getElementById('statDevices').textContent = ids.length;
+  document.getElementById('statOnline').textContent = onlineCount;
+  document.getElementById('statPairs').textContent = pairIds.length;
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const todayCount = flatEvents().filter(e => e.ts >= todayStart.getTime()).length;
+  document.getElementById('statAlarmsToday').textContent = todayCount;
+
+  renderOpsBoard(pairIds);
+  renderAllCasesMap(pairIds);
+  renderResetRequests();
+  renderContactRequestsGlobal();
+  renderLiveFeed();
+  updateRequestsDot();
+
+  const body = document.getElementById('devicesBody');
+  if (ids.length === 0) {
+    body.innerHTML = '<div class="empty">Henüz kayıtlı cihaz yok. Telefonlarda uygulamayı açıp isim/rol girildiğinde burada görünecek.</div>';
+  } else {
+    body.innerHTML = ids.map(id => {
+      const d = devices[id];
+      const online = isOnline(d);
+      const partners = partnerNames(id);
+      const battClass = typeof d.battery === 'number' && d.battery <= 30 ? 'batt low' : 'batt';
+      const battText = typeof d.battery === 'number' ? `🔋 ${d.battery}%` : '🔋 —';
+      const lastLoc = locations[id]?.ts ? timeAgo(locations[id].ts) : 'konum yok';
+      const nameSafe = escapeHtml(d.name || '').replace(/'/g, "\\'");
+      const callBtn = (d.battery <= 30 && d.phone)
+        ? `<a href="tel:${escapeHtml(d.phone)}" class="action-btn" title="${escapeHtml(d.phone)}">📞 Ara</a>` : '';
+      // Native istisna mesajları tam Java stack trace'iyle geliyor (onlarca
+      // "at ..." satırı) — bunu olduğu gibi basmak kartı devasa, çirkin bir
+      // kırmızı duvara çeviriyordu. Sadece ilk satırı (asıl hata) gösterip
+      // tam metni title tooltip'ine koyuyoruz; yanındaki ✕ ile de manuel
+      // temizlenebiliyor. Ayrıca servis ŞU AN çalışıyorsa (serviceAlive) bu
+      // eski hata artık geçmişte kalmış demektir — sadece servis GERÇEKTEN
+      // durduğunda (DURMUŞ) gösterilir, aksi halde çalışan bir cihazda
+      // yanıltıcı/gereksiz kırmızı yazı olarak kalırdı.
+      const showOldErrors = !serviceAlive(d);
+      const debugErr = showOldErrors && d.debugError?.msg
+        ? `<div class="err-line">⚠ Telefondan hata raporu (${escapeHtml(timeAgo(d.debugError.ts))}): <span class="err-msg" title="${escapeHtml(d.debugError.msg)}">${escapeHtml(truncateErrMsg(d.debugError.msg))}</span><a href="javascript:void(0)" class="err-dismiss" onclick="clearDeviceField('${id}','debugError')" title="Kaldır">✕</a></div>` : '';
+      // debugError, servis TİKLEDİKTEN sonraki (mesaj/konum işleme) hataları
+      // yakalar — servis hiç BAŞLAYAMAMIŞSA bu hiç yazılmaz. serviceStartError
+      // tam olarak o boşluğu kapatıyor: servisi başlatma çağrısının kendisi
+      // patladıysa gerçek istisna burada görünür.
+      const startErr = showOldErrors && d.serviceStartError?.msg
+        ? `<div class="err-line">🛑 Servis başlatılamadı (${escapeHtml(timeAgo(d.serviceStartError.ts))}): <span class="err-msg" title="${escapeHtml(d.serviceStartError.msg)}">${escapeHtml(truncateErrMsg(d.serviceStartError.msg))}</span><a href="javascript:void(0)" class="err-dismiss" onclick="clearDeviceField('${id}','serviceStartError')" title="Kaldır">✕</a></div>` : '';
+      // Cihaz Yöneticisi izni kapatıldığında (uygulama silinmeden önceki
+      // zorunlu adım) native koddan doğrudan yazılır — bu yüzden en
+      // kritik/görünür uyarı olarak en üstte gösteriliyor.
+      const uninstallWarn = d.uninstallAttempt?.msg
+        ? `<div style="font-size:12.5px; font-weight:700; color:#fff; background:var(--danger); border-radius:8px; padding:8px 10px; margin-bottom:10px;">🚨 SİLİNMEYE ÇALIŞILDI (${escapeHtml(timeAgo(d.uninstallAttempt.ts))}): ${escapeHtml(d.uninstallAttempt.msg)}</div>` : '';
+      return `<div class="device-card">
+        ${uninstallWarn}
+        <div class="device-card-head">
+          <div class="device-card-name">${escapeHtml(d.name || '—')}<span class="dot ${online ? 'on' : 'off'}"></span><span class="badge ${d.role}">${ROLE_LABEL[d.role] || d.role}</span></div>
+          <button class="secondary" onclick="deleteDevice('${id}')">Sil</button>
+        </div>
+        <div class="device-meta" style="margin-bottom:10px;">
+          <span class="${battClass}">${battText}</span>
+          <span>📍 ${escapeHtml(lastLoc)}</span>
+          <span>${partners.length ? `🔗 ${escapeHtml(partners.join(', '))} (${partners.length}/${MAX_PARTNERS})` : 'Eşleşmedi'}</span>
+          ${serviceBadge(d)}
+        </div>
+        <div class="device-actions">
+          <a href="javascript:void(0)" class="action-btn" onclick="openMsgModal('${id}','${nameSafe}')">💬 Mesaj Gönder${ackDot(id, 'adminMsg')}</a>
+          <a href="javascript:void(0)" class="action-btn" onclick="requestLocationNow('${id}')">📍 Konum İste${ackDot(id, 'locationRequest')}</a>
+          ${callBtn}
+        </div>
+        ${debugErr}
+        ${startErr}
+      </div>`;
+    }).join('');
+  }
+
+  const protectedOpts = ids.filter(id => devices[id].role === 'protected' && pairIdsForDevice(id).length < MAX_PARTNERS);
+  const trackedOpts = ids.filter(id => devices[id].role === 'tracked' && pairIdsForDevice(id).length < MAX_PARTNERS);
+  const selP = document.getElementById('selProtected');
+  const selT = document.getElementById('selTracked');
+  // Bu iki select her poll'da (3sn) yeniden çiziliyor; innerHTML'i olduğu
+  // gibi değiştirmek tarayıcıda seçili değeri sıfırlar. Kullanıcı bir cihaz
+  // seçtikten sonra "seçim kayboluyor/değişiyor" hissi buradan geliyordu —
+  // önceki seçimi (hâlâ geçerliyse) geri yüklüyoruz.
+  const prevP = selP.value;
+  const prevT = selT.value;
+  selP.innerHTML = protectedOpts.length
+    ? protectedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)} (${pairIdsForDevice(id).length}/${MAX_PARTNERS})</option>`).join('')
+    : '<option disabled selected>Uygun korunan cihaz yok</option>';
+  selT.innerHTML = trackedOpts.length
+    ? trackedOpts.map(id => `<option value="${id}">${escapeHtml(devices[id].name)} (${pairIdsForDevice(id).length}/${MAX_PARTNERS})</option>`).join('')
+    : '<option disabled selected>Uygun uzaklaştırılan cihaz yok</option>';
+  if (protectedOpts.includes(prevP)) selP.value = prevP;
+  if (trackedOpts.includes(prevT)) selT.value = prevT;
+
+  const list = document.getElementById('pairsList');
+  if (pairIds.length === 0) {
+    list.innerHTML = '<div class="empty">Henüz eşleştirme yok.</div>';
+  } else {
+    list.innerHTML = pairIds.map(pid => {
+      const p = pairs[pid];
+      const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+      const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+      const req = p.distanceRequest;
+      const zoneCount = Object.keys(deviceZones(p.protectedDeviceId)).length;
+      return `<div class="card" style="background:var(--surface-high); margin-bottom:12px;">
+        <div class="row" style="justify-content:space-between;">
+          <div class="pair-line pair-card-title" onclick="openDetail('${pid}')">🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}</div>
+          <div class="row" style="gap:8px;">
+            <button class="secondary" onclick="openDetail('${pid}')">Detay</button>
+            <button class="secondary" onclick="exportPdf('${pid}')">📄 PDF</button>
+            <button class="secondary" onclick="removePair('${pid}')">Eşleşmeyi Kaldır</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <span style="color:var(--muted); font-size:12px;">Sınır:</span>
+          <input type="number" id="th_${pid}" value="${p.threshold}" min="10" max="5000" style="width:90px;"/>
+          <span style="color:var(--muted); font-size:12px;">metre</span>
+          <button onclick="saveThreshold('${pid}')">Kaydet</button>
+          <span style="color:var(--muted); font-size:12px; margin-left:12px;">Ses: <b style="color:var(--text2)">${p.alarmSound || 'siren'}</b></span>
+          ${zoneCount ? `<span style="color:var(--muted); font-size:12px;">🚫 ${zoneCount} bölge</span>` : ''}
+        </div>
+        ${req ? `<div class="row" style="margin-top:12px;">
+          <span class="req">⚠ Talep: ${req.value}m</span>
+          <button class="safe" onclick="approveRequest('${pid}', ${req.value})">Onayla</button>
+          <button class="secondary" onclick="rejectRequest('${pid}')">Reddet</button>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function createPair() {
+  const btn = document.getElementById('pairBtn');
+  const protectedId = document.getElementById('selProtected').value;
+  const trackedId = document.getElementById('selTracked').value;
+  const threshold = Number(document.getElementById('newThreshold').value) || 100;
+  if (!protectedId || !trackedId || btn.disabled) return;
+  if (pairIdsForDevice(protectedId).length >= MAX_PARTNERS || pairIdsForDevice(trackedId).length >= MAX_PARTNERS) {
+    alert(`Bir cihaz en fazla ${MAX_PARTNERS} eşleşmede yer alabilir.`);
+    await refresh();
+    return;
+  }
+  const alreadyPaired = Object.values(pairs).some(p => p.protectedDeviceId === protectedId && p.trackedDeviceId === trackedId);
+  if (alreadyPaired) { alert('Bu iki cihaz zaten birbiriyle eşleşmiş.'); return; }
+  btn.disabled = true;
+  try {
+    // Aynı iki cihaz arasında rastgele değil, deterministik bir pairId
+    // kullanılıyor (protectedId_trackedId) — böylece eşleşme kaldırılıp aynı
+    // ikili tekrar eşleştirildiğinde alarm_log'daki eski geçmiş, pairId
+    // değişmediği için otomatik olarak geri gelir, kaybolmaz.
+    const pairId = `${protectedId}_${trackedId}`;
+    const isRepair = !!(await fetchJSON(`alarm_log/${pairId}`));
+    await putJSON(`pairs/${pairId}`, {
+      protectedDeviceId: protectedId, trackedDeviceId: trackedId,
+      threshold, alarmSound: 'siren', createdAt: Date.now(),
+    });
+    const pName = devices[protectedId]?.name || '(silinmiş)';
+    const tName = devices[trackedId]?.name || '(silinmiş)';
+    await logEvent(pairId, 'pair_created', { pName, tName, isRepair });
+    await refresh();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removePair(pairId) {
+  const p = pairs[pairId];
+  if (!p) return;
+  // Pair silindikten sonra pairLabel() artık ismi bulamayacağı için, isimler
+  // olay kaydına doğrudan gömülür (bkz. eventPairLabel) — böylece Canlı
+  // Akış'ta "eşleşme sonlandırıldı" kaydı hangi ikili olduğunu göstermeye
+  // devam eder.
+  const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+  const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+  await logEvent(pairId, 'pair_removed', { pName, tName });
+  await deletePath(`pairs/${pairId}`);
+  await refresh();
+}
+
+function renderResetRequests() {
+  const el = document.getElementById('resetRequestsList');
+  const pending = Object.keys(devices).filter(id => devices[id].passwordResetRequest);
+  el.innerHTML = pending.length
+    ? pending.map(id => {
+        const d = devices[id];
+        return `<div class="hist-row"><span>🔐 ${escapeHtml(d.name || id)}${d.email ? ` — ${escapeHtml(d.email)}` : ''} <span style="color:var(--muted); font-size:11px;">(${timeAgo(d.passwordResetRequest.ts)})</span></span>
+          <span class="row" style="gap:8px;">
+            <button class="safe" onclick="approvePasswordReset('${id}')">Onayla</button>
+            <button class="secondary" onclick="rejectPasswordReset('${id}')">Reddet</button>
+          </span>
+        </div>`;
+      }).join('')
+    : '<div class="empty">Bekleyen talep yok.</div>';
+}
+
+async function approvePasswordReset(deviceId) {
+  const d = devices[deviceId];
+  if (!d || !d.passwordResetRequest) return;
+  await patchJSON(`devices/${deviceId}`, { passwordHash: d.passwordResetRequest.passwordHash, passwordResetRequest: null });
+  await refresh();
+}
+
+async function rejectPasswordReset(deviceId) {
+  await patchJSON(`devices/${deviceId}`, { passwordResetRequest: null });
+  await refresh();
+}
+
+function renderContactRequestsGlobal() {
+  const el = document.getElementById('contactReqGlobalList');
+  const rows = [];
+  Object.keys(devices).forEach(deviceId => {
+    Object.entries(deviceContactRequests(deviceId)).forEach(([rid, r]) => {
+      const label = r.type === 'remove'
+        ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
+        : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi`;
+      rows.push({ deviceId, rid, ts: r.ts, label });
+    });
+  });
+  rows.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  el.innerHTML = rows.length
+    ? rows.map(({ deviceId, rid, ts, label }) => {
+        const dName = devices[deviceId]?.name || deviceId;
+        return `<div class="hist-row"><span>👤 <b>${escapeHtml(dName)}</b> — ${label} <span style="color:var(--muted); font-size:11px;">(${timeAgo(ts)})</span></span>
+          <span class="row" style="gap:8px;">
+            <button class="safe" onclick="approveContactRequest('${deviceId}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${deviceId}','${rid}')">Reddet</button>
+          </span>
+        </div>`;
+      }).join('')
+    : '<div class="empty">Bekleyen talep yok.</div>';
+}
+
+function truncateErrMsg(msg, max = 160) {
+  const firstLine = msg.split(' at ')[0].split('\n')[0];
+  return firstLine.length > max ? firstLine.slice(0, max) + '…' : firstLine;
+}
+
+async function clearDeviceField(deviceId, field) {
+  await deletePath(`devices/${deviceId}/${field}`);
+  await refresh();
+}
+
+async function deleteDevice(deviceId) {
+  const d = devices[deviceId];
+  if (!d) return;
+  const partners = partnerNames(deviceId);
+  const warn = partners.length ? `\n\nBu cihaz ${partners.length} eşleşmede yer alıyor, bunlar da silinecek.` : '';
+  if (!confirm(`"${d.name || deviceId}" cihazını silmek istediğine emin misin?${warn}`)) return;
+  for (const pid of pairIdsForDevice(deviceId)) {
+    const p = pairs[pid];
+    const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+    const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+    await logEvent(pid, 'pair_removed', { pName, tName });
+    await deletePath(`pairs/${pid}`);
+  }
+  await deletePath(`devices/${deviceId}`);
+  await deletePath(`locations/${deviceId}`);
+  await refresh();
+}
+
+async function saveThreshold(pairId) {
+  const val = Number(document.getElementById(`th_${pairId}`).value);
+  if (!val || val < 5) return;
+  await patchJSON(`pairs/${pairId}`, { threshold: val });
+  await refresh();
+}
+
+async function approveRequest(pairId, value) {
+  await patchJSON(`pairs/${pairId}`, { threshold: value, distanceRequest: null });
+  await refresh();
+}
+
+async function rejectRequest(pairId) {
+  await patchJSON(`pairs/${pairId}`, { distanceRequest: null });
+  await refresh();
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+function showNotif(title, opts) {
+  if (!notifEnabled) return;
+  if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
+    navigator.serviceWorker.ready
+      .then(reg => reg.showNotification(title, opts))
+      .catch(() => { try { new Notification(title, opts); } catch (_) {} });
+  } else if ('Notification' in window) {
+    try { new Notification(title, opts); } catch (_) {}
+  }
+}
+
+function enableNotifications() {
+  if (!('Notification' in window)) { alert('Bu tarayıcı bildirimleri desteklemiyor.'); return; }
+  Notification.requestPermission().then(async p => {
+    notifEnabled = p === 'granted';
+    document.getElementById('notifBtn').textContent = notifEnabled ? '🔔 Bildirimler Açık' : '🔕 İzin verilmedi';
+    if (notifEnabled) {
+      showNotif('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
+      await registerPushToken();
+    }
+  });
+}
+
+// Sekme/tarayıcı tamamen kapalıyken de bildirim alabilmek için: yukarıdaki
+// showNotif() sadece sayfa açıkken çalışır (poll döngüsü onu tetikliyor).
+// Bu token, telefon tarafında gerçek bir alarm/silme girişimi olduğunda
+// (Apps Script üzerinden) doğrudan bu tarayıcıya push göndermek için
+// kaydediliyor — panel kapalı olsa bile service worker (sw.js) bunu alıp
+// bildirim gösterebilir.
+async function registerPushToken() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const messaging = firebase.messaging();
+    const token = await messaging.getToken({ vapidKey: FIREBASE_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) return;
+    await pushJSON('adminPushTokens', { token, ts: { '.sv': 'timestamp' }, ua: navigator.userAgent.slice(0, 120) });
+  } catch (e) {
+    console.warn('Push token kaydedilemedi:', e);
+  }
+}
+
+let audioCtx = null;
+function playBeep() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    [0, 0.18].forEach(offset => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.3, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.15);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now + offset); osc.stop(now + offset + 0.16);
+    });
+  } catch (_) {}
+}
+
+function checkLiveEvents() {
+  const events = flatEvents();
+  const newest = events.filter(e => e.ts > lastSeenTs);
+  if (firstRefresh) { firstRefresh = false; if (events[0]) lastSeenTs = events[0].ts; return; }
+  if (newest.length === 0) return;
+  lastSeenTs = Math.max(...newest.map(e => e.ts));
+  // Eşleşme kurma/kaldırma kayıtları sadece Canlı Akış'ta görünsün; admin
+  // zaten kendi yaptığı işlem için bildirim/ses almasın.
+  const alertable = newest.filter(e => e.type !== 'pair_removed' && e.type !== 'pair_created');
+  if (!alertable.length) return;
+  playBeep();
+  const e = alertable[0];
+  showNotif(e.type === 'panic' ? '🆘 PANİK — UZAKDUR' : e.type === 'battery_critical' ? '🔴 Pil Kritik — UZAKDUR' : '⚠ UZAKDUR Uyarısı', {
+    body: `${eventPairLabel(e)} — ${eventLine(e)}`,
+  });
+  // Yeni gelen acil bir olay varsa Canlı Akış'ı elle tıklamaya gerek
+  // kalmadan doğrudan açıp göster; eski olaylar yine gizli kalıp
+  // tıklanınca açılmaya devam eder.
+  if (alertable.some(ev => feedSeverity(ev) === 'urgent')) {
+    liveFeedTab = 'urgent';
+    const dateInput = document.getElementById('feedDate');
+    if (dateInput) dateInput.value = todayDateStr();
+    renderLiveFeed();
+    document.getElementById('liveFeedPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function checkTamper() {
+  const banner = document.getElementById('tamperBanner');
+  const messages = [];
+  for (const pid of validPairIds()) {
+    const p = pairs[pid];
+    const trackedId = p.trackedDeviceId;
+    const d = devices[trackedId];
+    if (!d) continue;
+    const online = isOnline(d);
+    const key = trackedId;
+    if (prevOnline[key] === true && online === false) {
+      messages.push(`⚠ ${d.name || 'Cihaz'} beklenmedik şekilde çevrimdışı oldu.`);
+      logEvent(pid, 'tamper', { byDeviceId: trackedId });
+    }
+    prevOnline[key] = online;
+  }
+  if (messages.length) {
+    banner.style.display = 'block';
+    banner.textContent = messages.join('\n');
+    playBeep();
+  }
+}
+
+// Cihaz Yöneticisi izni kapatıldığında (uygulamayı silmenin zorunlu ön
+// adımı) native koddan devices/{id}/uninstallAttempt yazılır — bu, Flutter
+// hiç çalışmıyor olsa bile tetiklenen tek gerçek zamanlı sinyal. İlk
+// yüklemede (sayfa yeni açıldığında) eski bir kayıt için alarm çalmasın
+// diye önce sessizce referans alınır, sonra gerçekten YENİ bir olay
+// geldiğinde bildirim + ses + Canlı Akış kaydı üretilir.
+function checkUninstallAttempts() {
+  if (!uninstallCheckInitialized) {
+    uninstallCheckInitialized = true;
+    for (const id of Object.keys(devices)) {
+      prevUninstallTs[id] = devices[id].uninstallAttempt?.ts || null;
+    }
+    return;
+  }
+  for (const id of Object.keys(devices)) {
+    const d = devices[id];
+    const ts = d.uninstallAttempt?.ts;
+    if (!ts || prevUninstallTs[id] === ts) continue;
+    prevUninstallTs[id] = ts;
+    playBeep();
+    showNotif('🚨 SİLME GİRİŞİMİ — UZAKDUR', { body: `${d.name || 'Cihaz'} — cihaz yöneticisi izni kapatıldı, uygulama silinmek üzere olabilir.` });
+    for (const pid of pairIdsForDevice(id)) {
+      logEvent(pid, 'uninstall_attempt', { byDeviceId: id, deviceName: d.name || 'Cihaz' });
+    }
+  }
+}
+
+// Panele az önce girildiğinde (yenilemede değil, sadece ilk yüklemede) hâlâ
+// devam eden kritik bir yaklaşım varsa admin'in bunu kaçırmaması için — arka
+// planda geçen süre boyunca birikmiş olabilecek bir tehlikeyi tek bakışta
+// gösterir, aksi halde admin panele girip her eşleşmeyi tek tek kontrol
+// etmek zorunda kalırdı.
+function checkCriticalOnLoad() {
+  if (firstLoadChecked) return;
+  firstLoadChecked = true;
+  const banner = document.getElementById('criticalOnLoadBanner');
+  if (!banner) return;
+  const criticalPairs = validPairIds().filter(pid => pairStatus(pid).status === 'acil');
+  if (!criticalPairs.length) { banner.style.display = 'none'; return; }
+  const links = criticalPairs.map(pid =>
+    `<a href="#" onclick="openDetail('${pid}'); return false;" style="color:inherit; text-decoration:underline; font-weight:800;">${escapeHtml(pairLabel(pid))}</a>`
+  ).join(', ');
+  banner.innerHTML = `🚨 Panele girdiğinde tehlikeli bir yaklaşım devam ediyordu — şu eşleşmeyi hemen kontrol et: ${links}
+    <button onclick="this.parentElement.style.display='none'" style="margin-left:10px; background:none; border:1px solid currentColor; border-radius:6px; color:inherit; padding:2px 10px; cursor:pointer; font-size:11.5px;">Kapat</button>`;
+  banner.style.display = 'block';
+  playBeep();
+}
+
+// Pil %30 altına düşünce bir kez "önemli", %15 altına düşünce bir kez daha
+// "acil" olay kaydı düşer (hem korunan hem uzaklaştırılan cihaz için).
+// Cihaz birden fazla eşleşmede yer alabildiğinden olay, o cihazın yer
+// aldığı tüm eşleşmelere yazılır ki hangi eşleşme açıksa görünsün.
+function checkBatteryLevels() {
+  for (const id of Object.keys(devices)) {
+    const d = devices[id];
+    if (typeof d.battery !== 'number') continue;
+    const level = d.battery;
+    const prevTier = prevBatteryTier[id] || 0;
+    let tier = prevTier;
+    let type = null;
+    if (level <= 15) { tier = 2; if (prevTier < 2) type = 'battery_critical'; }
+    else if (level <= 30) { tier = 1; if (prevTier < 1) type = 'battery_low'; }
+    else if (level >= 40) { tier = 0; }
+    if (type) {
+      for (const pid of pairIdsForDevice(id)) {
+        logEvent(pid, type, { byDeviceId: id, battery: level, role: d.role });
+      }
+    }
+    prevBatteryTier[id] = tier;
+  }
+}
+
+async function refresh() {
+  const banner = document.getElementById('errBanner');
+  try {
+    const [d, p, l, a] = await Promise.all([fetchJSON('devices'), fetchJSON('pairs'), fetchJSON('locations'), fetchJSON('alarm_log')]);
+    devices = d || {};
+    pairs = p || {};
+    locations = l || {};
+    alarmLogAll = a || {};
+    banner.style.display = 'none';
+    checkTamper();
+    checkBatteryLevels();
+    checkUninstallAttempts();
+    checkLiveEvents();
+    checkCriticalOnLoad();
+    render();
+    if (openPairId && pairs[openPairId]) { updateDetailMap(); renderZoneList(openPairId); renderContactList(openPairId); renderContactRequests(openPairId); renderEmailAlertTypes(openPairId); }
+    else if (openPairId && !pairs[openPairId]) closeDetail();
+  } catch (e) {
+    banner.style.display = 'block';
+    banner.textContent = '⚠ Veri alınamadı: ' + e.message + '\n\nOlası sebepler: Firebase veritabanı kuralları okumaya kapalı olabilir, ya da bu ağ Firebase\'e erişimi engelliyor olabilir. Bu mesajı olduğu gibi Claude\'a ilet.';
+  }
+}
+
+function openDetail(pairId) {
+  const p = pairs[pairId];
+  if (!p) return;
+  openPairId = pairId;
+  const pName = devices[p.protectedDeviceId]?.name || '(silinmiş)';
+  const tName = devices[p.trackedDeviceId]?.name || '(silinmiş)';
+  document.getElementById('detailTitle').innerHTML = `🛡️ ${escapeHtml(pName)} <span class="arrow">⇄</span> 🎯 ${escapeHtml(tName)}`;
+  document.getElementById('detailThreshold').value = p.threshold;
+  document.getElementById('detailTrackedCanSeeLoc').checked = !!p.trackedCanSeeLocation;
+  document.getElementById('detailTrackedCanSeeZones').checked = !!p.trackedCanSeeZones;
+  const reqEl = document.getElementById('detailReq');
+  reqEl.innerHTML = p.distanceRequest ? `<div class="row" style="margin-top:10px;">
+      <span class="req">⚠ Talep: ${p.distanceRequest.value}m</span>
+      <button class="safe" onclick="approveRequest('${pairId}', ${p.distanceRequest.value}); closeDetail();">Onayla</button>
+      <button class="secondary" onclick="rejectRequest('${pairId}'); closeDetail();">Reddet</button>
+    </div>` : '';
+  document.getElementById('ecName').value = '';
+  document.getElementById('ecPhone').value = '';
+  document.getElementById('ecEmail').value = '';
+  renderContactList(pairId);
+  renderContactRequests(pairId);
+  renderEmailAlertTypes(pairId);
+  document.getElementById('dashboardView').classList.add('hidden');
+  document.getElementById('caseView').classList.remove('hidden');
+  window.scrollTo(0, 0);
+  detailMapFitted = false;
+
+  try {
+    if (typeof L === 'undefined') throw new Error('Harita kütüphanesi (Leaflet) yüklenemedi — ağın unpkg.com adresine erişimi engelliyor olabilir.');
+    if (!detailMapObj) {
+      detailMapObj = L.map('detailMap', { zoomControl: true, attributionControl: false });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(detailMapObj);
+    }
+    setTimeout(() => detailMapObj.invalidateSize(), 50);
+    updateDetailMap();
+  } catch (e) {
+    document.getElementById('detailMap').innerHTML = `<div class="empty" style="color:var(--danger); padding:16px;">Harita yüklenemedi: ${escapeHtml(e.message)}</div>`;
+  }
+  renderZoneList(pairId);
+  loadDetailHistory(pairId);
+}
+
+function closeDetail() {
+  openPairId = null;
+  closeZonePicker();
+  document.getElementById('caseView').classList.add('hidden');
+  document.getElementById('dashboardView').classList.remove('hidden');
+  setTimeout(() => allCasesMapObj && allCasesMapObj.invalidateSize(), 50);
+}
+
+// 'circle' (nokta + yarıçap — tam alarm) ile 'route' (korunanın düzenli
+// kullandığı bir güzergah — çoklu nokta + koridor genişliği, sadece
+// kademeli kritik/sınır uyarısı; bkz. telefon tarafındaki ZoneData) arasında
+// geçiş. Mod değişince o ana kadar seçilmiş nokta(lar) sıfırlanır.
+function setZoneMode(mode) {
+  zonePickerMode = mode;
+  document.getElementById('zoneModeBtn_circle').className = mode === 'circle' ? '' : 'secondary';
+  document.getElementById('zoneModeBtn_route').className = mode === 'route' ? '' : 'secondary';
+  document.getElementById('zonePickerHint').textContent = mode === 'route'
+    ? 'Yol üzerindeki noktalara haritada sırayla tıkla (en az 2 nokta gerekir), sonra ad ve koridor genişliği gir.'
+    : 'Eklemek istediğin noktaya haritada tıkla, sonra ad ve yarıçap gir.';
+  document.getElementById('zoneRouteControls').style.display = mode === 'route' ? 'flex' : 'none';
+  document.getElementById('zoneRadius').placeholder = mode === 'route' ? 'Koridor genişliği (m)' : 'Yarıçap (m)';
+  document.getElementById('zoneRadiusHint').textContent = mode === 'route'
+    ? 'Koridor genişliği, yolun iki yanında ne kadar mesafeye kadar kademeli (kritik/sınır) uyarı verileceğini belirler — tam alarm tetiklemez. 50-100m arası önerilir.'
+    : 'Çok dar bir yarıçap (ör. 10-20m) telefonun GPS sapmasıyla yanlış alarm üretebilir ve daha sık kontrol gerektirdiği için pili daha çok tüketir. En az 100m öneririz.';
+  resetZonePickerSelection();
+}
+function resetZonePickerSelection() {
+  zonePickerLatLng = null;
+  routePoints = [];
+  if (zonePickerMarker && zonePickerMapObj) { zonePickerMapObj.removeLayer(zonePickerMarker); zonePickerMarker = null; }
+  if (routePolyline && zonePickerMapObj) { zonePickerMapObj.removeLayer(routePolyline); routePolyline = null; }
+  if (zonePickerMapObj) routePointMarkers.forEach(m => zonePickerMapObj.removeLayer(m));
+  routePointMarkers = [];
+  document.getElementById('zoneRoutePointCount').textContent = '0 nokta';
+  document.getElementById('zoneSaveBtn').disabled = true;
+}
+function undoRoutePoint() {
+  if (!routePoints.length) return;
+  routePoints.pop();
+  const m = routePointMarkers.pop();
+  if (m) zonePickerMapObj.removeLayer(m);
+  updateRoutePolyline();
+}
+function updateRoutePolyline() {
+  if (routePolyline) { zonePickerMapObj.removeLayer(routePolyline); routePolyline = null; }
+  if (routePoints.length >= 2) {
+    routePolyline = L.polyline(routePoints.map(p => [p.lat, p.lon]), { color: '#3B82F6', weight: 4, dashArray: '8,6' }).addTo(zonePickerMapObj);
+  }
+  document.getElementById('zoneRoutePointCount').textContent = `${routePoints.length} nokta`;
+  document.getElementById('zoneSaveBtn').disabled = routePoints.length < 2;
+}
+function openZonePicker() {
+  if (!openPairId) return;
+  document.getElementById('zonePickerOverlay').style.display = 'flex';
+  document.getElementById('zoneLabel').value = '';
+  document.getElementById('zoneRadius').value = 100;
+  setZoneMode('circle');
+
+  try {
+    if (typeof L === 'undefined') throw new Error('Harita kütüphanesi (Leaflet) yüklenemedi — ağın unpkg.com adresine erişimi engelliyor olabilir.');
+    if (!zonePickerMapObj) {
+      zonePickerMapObj = L.map('zonePickerMap', { zoomControl: true, attributionControl: false });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(zonePickerMapObj);
+      zonePickerMapObj.on('click', (e) => {
+        if (zonePickerMode === 'route') {
+          routePoints.push({ lat: e.latlng.lat, lon: e.latlng.lng });
+          const m = L.circleMarker(e.latlng, { radius: 5, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 1 }).addTo(zonePickerMapObj);
+          routePointMarkers.push(m);
+          updateRoutePolyline();
+        } else {
+          zonePickerLatLng = e.latlng;
+          if (zonePickerMarker) zonePickerMapObj.removeLayer(zonePickerMarker);
+          zonePickerMarker = L.marker(e.latlng).addTo(zonePickerMapObj);
+          document.getElementById('zoneSaveBtn').disabled = false;
+        }
+      });
+    }
+    const p = pairs[openPairId];
+    const center = (p && (locations[p.protectedDeviceId] || locations[p.trackedDeviceId])) || null;
+    setTimeout(() => {
+      zonePickerMapObj.invalidateSize();
+      if (center) zonePickerMapObj.setView([center.lat, center.lon], 15);
+      else zonePickerMapObj.setView([41.0082, 28.9784], 11);
+    }, 50);
+  } catch (e) {
+    document.getElementById('zonePickerMap').innerHTML = `<div class="empty" style="color:var(--danger); padding:16px;">Harita yüklenemedi: ${escapeHtml(e.message)}</div>`;
+  }
+}
+function closeZonePicker() {
+  document.getElementById('zonePickerOverlay').style.display = 'none';
+}
+async function confirmAddZone() {
+  if (!openPairId) return;
+  const p = pairs[openPairId];
+  if (!p) return;
+  const zoneId = genId();
+  if (zonePickerMode === 'route') {
+    if (routePoints.length < 2) return;
+    const label = document.getElementById('zoneLabel').value.trim() || 'Yol';
+    const width = Number(document.getElementById('zoneRadius').value) || 80;
+    await patchJSON(`devices/${p.protectedDeviceId}/zones/${zoneId}`, { label, type: 'route', points: routePoints, width });
+  } else {
+    if (!zonePickerLatLng) return;
+    const label = document.getElementById('zoneLabel').value.trim() || 'Bölge';
+    const radius = Number(document.getElementById('zoneRadius').value) || 100;
+    await patchJSON(`devices/${p.protectedDeviceId}/zones/${zoneId}`, { label, lat: zonePickerLatLng.lat, lon: zonePickerLatLng.lng, radius });
+  }
+  closeZonePicker();
+  await refresh();
+}
+function deleteZone(protectedDeviceId, zoneId) {
+  deletePath(`devices/${protectedDeviceId}/zones/${zoneId}`).then(refresh);
+}
+function renderZoneList(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('zoneList');
+  if (!p) return;
+  const zones = Object.entries(deviceZones(p.protectedDeviceId));
+  el.innerHTML = zones.length
+    ? zones.map(([zid, z]) => {
+        const desc = z.type === 'route'
+          ? `🛣️ ${escapeHtml(z.label)} (${(z.points || []).length} nokta, ${z.width || 80}m koridor — kritik/sınır uyarısı)`
+          : `🚫 ${escapeHtml(z.label)} (${z.radius}m)`;
+        return `<div class="hist-row"><span>${desc}</span><button class="secondary" onclick="deleteZone('${p.protectedDeviceId}','${zid}')">Sil</button></div>`;
+      }).join('')
+    : '<div class="empty">Henüz bölge eklenmedi.</div>';
+}
+
+async function addEmergencyContact() {
+  if (!openPairId) return;
+  const p = pairs[openPairId];
+  if (!p) return;
+  const name = document.getElementById('ecName').value.trim();
+  const phone = document.getElementById('ecPhone').value.trim();
+  const email = document.getElementById('ecEmail').value.trim();
+  const type = document.getElementById('ecType').value;
+  if (!name && !phone && !email) return;
+  const cid = genId();
+  await patchJSON(`devices/${p.protectedDeviceId}/emergencyContacts/${cid}`, { name, phone, email, type });
+  document.getElementById('ecName').value = '';
+  document.getElementById('ecPhone').value = '';
+  document.getElementById('ecEmail').value = '';
+  await refresh();
+}
+function deleteEmergencyContact(protectedDeviceId, contactId) {
+  deletePath(`devices/${protectedDeviceId}/emergencyContacts/${contactId}`).then(refresh);
+}
+function renderContactList(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('contactList');
+  if (!p) return;
+  const contacts = Object.entries(deviceContacts(p.protectedDeviceId));
+  el.innerHTML = contacts.length
+    ? contacts.map(([cid, c]) => `<div class="hist-row"><span>${c.type === 'authority' ? '🚓' : '👤'} ${escapeHtml(c.name || '(isimsiz)')} — ${escapeHtml(c.email || c.phone || '—')}${c.type === 'authority' ? ' <span class="badge" style="background:var(--warning);color:#fff;">Yetkili</span>' : ''}</span><button class="secondary" onclick="deleteEmergencyContact('${p.protectedDeviceId}','${cid}')">Sil</button></div>`).join('')
+    : '<div class="empty">Henüz acil durum kişisi eklenmedi.</div>';
+}
+
+// Korunan rolü kişi ekleme/çıkarmayı doğrudan yapamaz; buradan onaylanır.
+function renderContactRequests(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('contactRequestsList');
+  if (!p) return;
+  const reqs = Object.entries(deviceContactRequests(p.protectedDeviceId));
+  el.innerHTML = reqs.length
+    ? `<small class="hint" style="margin-bottom:6px;">⚠ Bekleyen kişi talepleri</small>` + reqs.map(([rid, r]) => {
+        const label = r.type === 'remove'
+          ? `"${escapeHtml(r.targetName || '(isimsiz)')}" kişisini kaldırma talebi`
+          : `${r.contactType === 'authority' ? '🚓' : '👤'} "${escapeHtml(r.name || '(isimsiz)')}" ekleme talebi (${escapeHtml(r.email || r.phone || '—')})`;
+        return `<div class="hist-row"><span class="req">${label}</span>
+          <span class="row" style="gap:8px;">
+            <button class="safe" onclick="approveContactRequest('${p.protectedDeviceId}','${rid}')">Onayla</button>
+            <button class="secondary" onclick="rejectContactRequest('${p.protectedDeviceId}','${rid}')">Reddet</button>
+          </span>
+        </div>`;
+      }).join('')
+    : '';
+}
+
+// Hangi olay tiplerinin acil durum kişilerine mail attıracağını (Apps
+// Script'in checkAlarms() fonksiyonu üzerinden) admin buradan seçer.
+// Ayarlanmamış (eski) eşleşmelerde varsayılan hepsi açıktır — geriye dönük
+// uyumluluk için, Apps Script tarafında da aynı varsayım geçerli.
+const EMAIL_ALERT_TYPE_LABELS = {
+  panic: '🆘 Panik',
+  emergency_confirmed: '🆘 Onaylı Acil Durum ("İyi misin?" sonrası)',
+  zone: '🚫 Yasak Bölge (tek seferlik bildirim)',
+  proximity: '⚠️ Acil Yaklaşma (tam alarm)',
+  kritik: '🟠 Kritik Yaklaşma (mesafe/güzergah)',
+  sinir: '🔵 Sınır İhlali (en hafif kademe)',
+  tamper: '📴 Beklenmedik Çevrimdışı',
+  battery_critical: '🔴 Pil Kritik',
+  battery_low: '🟡 Pil Azalıyor',
+  uninstall_attempt: '🗑️ Silme Girişimi',
+};
+const EMAIL_ALERT_TYPE_ORDER = ['panic', 'emergency_confirmed', 'zone', 'proximity', 'kritik', 'sinir', 'tamper', 'battery_critical', 'battery_low', 'uninstall_attempt'];
+
+function renderEmailAlertTypes(pairId) {
+  const p = pairs[pairId];
+  const el = document.getElementById('emailAlertTypesList');
+  if (!p || !el) return;
+  const settings = p.emailAlertTypes || {};
+  el.innerHTML = EMAIL_ALERT_TYPE_ORDER.map(type => {
+    const checked = settings[type] !== false; // varsayılan: açık
+    return `<label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; color:var(--text2); padding:5px 0;">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="setEmailAlertType('${pairId}','${type}', this.checked)"/>
+      ${EMAIL_ALERT_TYPE_LABELS[type]}
+    </label>`;
+  }).join('');
+}
+
+async function setEmailAlertType(pairId, type, enabled) {
+  await patchJSON(`pairs/${pairId}/emailAlertTypes`, { [type]: enabled });
+  await refresh();
+}
+
+async function approveContactRequest(protectedDeviceId, requestId) {
+  const req = deviceContactRequests(protectedDeviceId)[requestId];
+  if (!req) return;
+  if (req.type === 'remove') {
+    if (req.targetContactId) await deletePath(`devices/${protectedDeviceId}/emergencyContacts/${req.targetContactId}`);
+  } else {
+    const cid = genId();
+    await patchJSON(`devices/${protectedDeviceId}/emergencyContacts/${cid}`, {
+      name: req.name || '', phone: req.phone || '', email: req.email || '', type: req.contactType || 'family',
+    });
+  }
+  await deletePath(`devices/${protectedDeviceId}/contactRequests/${requestId}`);
+  await refresh();
+}
+
+async function rejectContactRequest(protectedDeviceId, requestId) {
+  await deletePath(`devices/${protectedDeviceId}/contactRequests/${requestId}`);
+  await refresh();
+}
+
+function updateDetailMap() {
+  const p = pairs[openPairId];
+  if (!p || !detailMapObj) return;
+  detailMarkers.forEach(m => detailMapObj.removeLayer(m));
+  detailMarkers = [];
+  if (detailCircle) { detailMapObj.removeLayer(detailCircle); detailCircle = null; }
+  if (detailCautionCircle) { detailMapObj.removeLayer(detailCautionCircle); detailCautionCircle = null; }
+  if (detailSinirCircle) { detailMapObj.removeLayer(detailSinirCircle); detailSinirCircle = null; }
+  detailZoneLayers.forEach(l => detailMapObj.removeLayer(l));
+  detailZoneLayers = [];
+
+  const pLoc = locations[p.protectedDeviceId];
+  const tLoc = locations[p.trackedDeviceId];
+  const n = validPairIds().indexOf(openPairId) + 1;
+  const pName = devices[p.protectedDeviceId]?.name || 'Korunan';
+  const tName = devices[p.trackedDeviceId]?.name || 'Uzaklaştırılan';
+  const pts = [];
+  if (pLoc) {
+    const m = L.circleMarker([pLoc.lat, pLoc.lon], { radius: 8, color: '#22C55E', fillColor: '#22C55E', fillOpacity: .9, weight: 2 })
+      .addTo(detailMapObj).bindPopup('🛡️ ' + pName)
+      .bindTooltip(`${n}-Korunan ${escapeHtml(pName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label protected' });
+    detailMarkers.push(m);
+    pts.push([pLoc.lat, pLoc.lon]);
+    // Üç kademe, eşiğin (p.threshold) yüzdesine göre: kırmızı (%50, ACİL/tam
+    // alarm), turuncu (%80, KRİTİK), mavi (%100, SINIR — dış sınır).
+    if (p.threshold > 0) {
+      detailCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.5, color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.1, weight: 1 }).addTo(detailMapObj);
+      detailCautionCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold * 0.8, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.07, weight: 1, dashArray: '4,4' }).addTo(detailMapObj);
+      detailSinirCircle = L.circle([pLoc.lat, pLoc.lon], { radius: p.threshold, color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.04, weight: 1, dashArray: '2,6' }).addTo(detailMapObj);
+    }
+  }
+  if (tLoc) {
+    const m = L.circleMarker([tLoc.lat, tLoc.lon], { radius: 8, color: '#EF4444', fillColor: '#EF4444', fillOpacity: .9, weight: 2 })
+      .addTo(detailMapObj).bindPopup('🎯 ' + tName)
+      .bindTooltip(`${n}-Uzaklaştırılan ${escapeHtml(tName)}`, { permanent: true, direction: 'top', offset: [0, -8], className: 'map-label tracked' });
+    detailMarkers.push(m);
+    pts.push([tLoc.lat, tLoc.lon]);
+  }
+  for (const [zid, z] of Object.entries(deviceZones(p.protectedDeviceId))) {
+    if (z.type === 'route' && Array.isArray(z.points) && z.points.length >= 2) {
+      const latlngs = z.points.map(pt => [pt.lat, pt.lon]);
+      const line = L.polyline(latlngs, { color: '#3B82F6', weight: 5, opacity: .7, dashArray: '10,6' })
+        .addTo(detailMapObj).bindPopup(`🛣️ ${escapeHtml(z.label)} (${z.width || 80}m koridor — kritik/sınır uyarısı)`);
+      detailZoneLayers.push(line);
+      const mid = z.points[Math.floor(z.points.length / 2)];
+      const zm = L.marker([mid.lat, mid.lon], { icon: L.divIcon({ className: 'zone-pin', html: '🛣️', iconSize: [22, 22] }) })
+        .addTo(detailMapObj).bindPopup(`🛣️ ${escapeHtml(z.label)}`);
+      detailZoneLayers.push(zm);
+      latlngs.forEach(ll => pts.push(ll));
+      continue;
+    }
+    const c = L.circle([z.lat, z.lon], { radius: z.radius, color: '#F59E0B', fillColor: '#F59E0B', fillOpacity: 0.22, weight: 2, dashArray: '6,5' }).addTo(detailMapObj).bindPopup('🚫 ' + escapeHtml(z.label));
+    detailZoneLayers.push(c);
+    const zm = L.marker([z.lat, z.lon], { icon: L.divIcon({ className: 'zone-pin', html: '🚫', iconSize: [22, 22] }) }).addTo(detailMapObj).bindPopup('🚫 ' + escapeHtml(z.label));
+    detailZoneLayers.push(zm);
+    pts.push([z.lat, z.lon]);
+  }
+  // Only auto-fit the view the first time this case's map has points to show —
+  // afterwards just move the markers, so the admin's manual zoom/pan sticks
+  // between polls instead of snapping back every few seconds.
+  if (!detailMapFitted) {
+    if (pts.length >= 2) detailMapObj.fitBounds(pts, { padding: [30, 30] });
+    else if (pts.length === 1) detailMapObj.setView(pts[0], 16);
+    else detailMapObj.setView([41.0082, 28.9784], 6);
+    if (pts.length > 0) detailMapFitted = true;
+  }
+}
+
+async function loadDetailHistory(pairId) {
+  const el = document.getElementById('detailHistory');
+  el.textContent = 'Yükleniyor…';
+  try {
+    const log = await fetchJSON(`alarm_log/${pairId}`);
+    if (openPairId !== pairId) return;
+    if (!log) { el.innerHTML = '<div class="empty">Henüz alarm kaydı yok.</div>'; return; }
+    const entries = Object.values(log).filter(isValidLogEntry).sort((a, b) => b.ts - a.ts).slice(0, 30);
+    el.innerHTML = entries.map(e => {
+      const name = devices[e.byDeviceId]?.name || (e.byDeviceId === 'admin' ? 'Sistem' : '(silinmiş cihaz)');
+      const date = new Date(e.ts).toLocaleString('tr-TR');
+      const type = e.type || 'proximity';
+      const valueEl = type === 'panic' ? '<span class="badge panic">PANİK</span>'
+        : type === 'zone' ? `<span style="color:var(--warning); font-weight:700;">🚫 ${escapeHtml(e.zoneLabel || '')}</span>`
+        : type === 'tamper' ? `<span style="color:var(--warning); font-weight:700;">çevrimdışı</span>`
+        : `<span style="color:var(--danger); font-weight:700;">${e.distance}m</span>`;
+      return `<div class="hist-row"><span>${escapeHtml(date)} — ${escapeHtml(name)}</span>${valueEl}</div>`;
+    }).join('') || '<div class="empty">Henüz alarm kaydı yok.</div>';
+  } catch (e) {
+    el.innerHTML = `<div class="empty" style="color:var(--danger)">Uyarı geçmişi alınamadı: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// jsPDF varsayılan yazı tipi Türkçe özel karakterleri (ığşöçü) düzgün
+// göstermiyor — rapordaki tüm metinler bu yüzden ASCII'ye çevriliyor.
+function toAsciiTr(s) {
+  return String(s)
+    .replace(/ı/g, 'i').replace(/İ/g, 'I')
+    .replace(/ğ/g, 'g').replace(/Ğ/g, 'G')
+    .replace(/ü/g, 'u').replace(/Ü/g, 'U')
+    .replace(/ş/g, 's').replace(/Ş/g, 'S')
+    .replace(/ö/g, 'o').replace(/Ö/g, 'O')
+    .replace(/ç/g, 'c').replace(/Ç/g, 'C');
+}
+
+// Her önemli uyarının PDF'te (sadece tür/değer değil) tam bir açıklaması
+// olsun diye — eventLine()'ın ASCII'ye çevrilmiş, PDF'e özel hali.
+function pdfEventDescription(e) {
+  const type = e.type || 'proximity';
+  if (type === 'panic') return 'Panik butonuna basildi.';
+  if (type === 'emergency_confirmed') return '"Iyi misin?" sorusuna evet dendi, acil durum bilgilendirmesi istendi.';
+  if (type === 'zone') return `Yasak bolgeye girildi: ${e.zoneLabel || '(isimsiz)'}`;
+  if (type === 'tamper') return 'Cihaz beklenmedik sekilde cevrimdisi oldu.';
+  if (type === 'pair_removed') return 'Eslesme sonlandirildi.';
+  if (type === 'pair_created') return e.isRepair ? 'Eslesme yeniden kuruldu, gecmis korundu.' : 'Yeni eslesme olusturuldu.';
+  if (type === 'battery_critical') return `Pil kritik seviyede (%${e.battery}).`;
+  if (type === 'battery_low') return `Pil azaliyor (%${e.battery}).`;
+  if (type === 'kritik') return e.zoneLabel ? `"${e.zoneLabel}" guzergahina kritik yaklasma.` : `Esigin %50-80 arasina yaklasildi (${e.distance}m).`;
+  if (type === 'sinir') return e.zoneLabel ? `"${e.zoneLabel}" guzergahina yaklasildi.` : `Esigin %80-100 arasina (sinir) girildi (${e.distance}m).`;
+  return `Esigin %50'sinin altina inildi, tam alarm calisti (${e.distance}m).`;
+}
+
+// pairId verilmezse açık olan vaka detayının pairId'si kullanılır — hem
+// detay ekranındaki "PDF İndir" butonu hem Aktif Eşleşmeler listesindeki
+// hızlı "📄 PDF" butonu aynı fonksiyonu çağırabilsin diye.
+async function exportPdf(pairId) {
+  const pid = pairId || openPairId;
+  if (!pid || !pairs[pid] || !window.jspdf) return;
+  const p = pairs[pid];
+  const pName = devices[p.protectedDeviceId]?.name || '?';
+  const tName = devices[p.trackedDeviceId]?.name || '?';
+  const log = await fetchJSON(`alarm_log/${pid}`);
+  const entries = log ? Object.values(log).filter(isValidLogEntry).sort((a, b) => b.ts - a.ts) : [];
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16); doc.text('UZAKDUR - Alarm Gecmisi Raporu', 14, 18);
+  doc.setFontSize(10); doc.text(toAsciiTr(`${pName} <-> ${tName}`), 14, 26);
+  doc.text(`Olusturulma: ${new Date().toLocaleString('tr-TR')}`, 14, 32);
+  doc.text(`Acil: ${Math.round(p.threshold * 0.5)}m  -  Kritik: ${Math.round(p.threshold * 0.8)}m  -  Sinir: ${p.threshold}m`, 14, 38);
+  let y = 50;
+  doc.setFontSize(9);
+  doc.text('Tarih', 14, y); doc.text('Tur', 68, y); doc.text('Deger', 96, y); doc.text('Aciklama', 122, y);
+  y += 4; doc.line(14, y, 196, y); y += 6;
+  if (entries.length === 0) { doc.text('Kayit yok.', 14, y); }
+  for (const e of entries) {
+    if (y > 280) { doc.addPage(); y = 20; }
+    const type = e.type || 'proximity';
+    const label = type === 'panic' ? 'PANIK' : type === 'emergency_confirmed' ? 'Acil onay'
+      : type === 'zone' ? 'Yasak bolge' : type === 'tamper' ? 'Cevrimdisi'
+      : type === 'kritik' ? 'Kritik yaklasma' : type === 'sinir' ? 'Sinir ihlali'
+      : type === 'pair_created' ? 'Eslesme kuruldu' : type === 'pair_removed' ? 'Eslesme sonlandi'
+      : type === 'battery_critical' ? 'Pil kritik' : type === 'battery_low' ? 'Pil azaliyor' : 'Yaklasma';
+    const value = type === 'zone' || type === 'kritik' || type === 'sinir' ? toAsciiTr(e.zoneLabel || (e.distance != null ? `${e.distance}m` : '-'))
+      : (type === 'battery_critical' || type === 'battery_low') ? `%${e.battery}`
+      : type === 'panic' || type === 'emergency_confirmed' || type === 'tamper' || type === 'pair_created' || type === 'pair_removed' ? '-' : `${e.distance}m`;
+    const desc = toAsciiTr(pdfEventDescription(e)).slice(0, 62);
+    doc.text(new Date(e.ts).toLocaleString('tr-TR'), 14, y);
+    doc.text(label, 68, y);
+    doc.text(String(value), 96, y);
+    doc.text(desc, 122, y);
+    y += 6;
+  }
+  doc.save(`uzakdur-${toAsciiTr(pName)}-${toAsciiTr(tName)}.pdf`);
+}
+
+async function saveDetailThreshold() {
+  if (!openPairId) return;
+  const val = Number(document.getElementById('detailThreshold').value);
+  if (!val || val < 5) return;
+  await patchJSON(`pairs/${openPairId}`, { threshold: val });
+  await refresh();
+}
+
+async function toggleTrackedCanSeeLocation(checked) {
+  if (!openPairId) return;
+  await patchJSON(`pairs/${openPairId}`, { trackedCanSeeLocation: checked });
+  await refresh();
+}
+
+async function toggleTrackedCanSeeZones(checked) {
+  if (!openPairId) return;
+  await patchJSON(`pairs/${openPairId}`, { trackedCanSeeZones: checked });
+  await refresh();
+}
+
+let pollHandle = null;
+function boot() {
+  const savedTab = localStorage.getItem('uzakdur_admin_tab');
+  showMainTab(MAIN_TABS.includes(savedTab) ? savedTab : 'ops');
+  refresh();
+  if (!pollHandle) pollHandle = setInterval(refresh, 3000);
+}
+
+window.addEventListener('unhandledrejection', ev => {
+  const banner = document.getElementById('errBanner');
+  if (!banner) return;
+  banner.style.display = 'block';
+  banner.textContent = '⚠ Beklenmeyen hata: ' + (ev.reason?.message || ev.reason) + '\n\nBu mesajı olduğu gibi Claude\'a ilet.';
+});
+</script>
+</body>
+</html>
