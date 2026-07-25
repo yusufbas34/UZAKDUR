@@ -172,6 +172,11 @@ class PairData {
   // alır. Bu, admin panelinden istisnai olarak (ör. mahkeme kararı
   // gerektiriyorsa) açılabilecek bir izin bayrağıdır.
   final bool trackedCanSeeLocation;
+  // Aynı mantık yasak bölgeler ve rota (güzergah) çizimleri için — varsayılan
+  // kapalı: uzaklaştırılan hangi bölgelerin/güzergahların tanımlı olduğunu
+  // haritada GÖRMEZ (yine de bunlara yaklaşınca/girince alarm/uyarı almaya
+  // devam eder, sadece görsel olarak gizli kalır). Admin panelinden açılabilir.
+  final bool trackedCanSeeZones;
   const PairData({
     required this.id,
     required this.protectedDeviceId,
@@ -180,6 +185,7 @@ class PairData {
     required this.alarmSound,
     this.distanceRequest,
     this.trackedCanSeeLocation = false,
+    this.trackedCanSeeZones = false,
   });
 
   // Not: yasak bölgeler ve acil durum kişileri artık pair'e değil, korunan
@@ -198,6 +204,7 @@ class PairData {
             ? ((map['distanceRequest']['value'] as num).toDouble())
             : null,
         trackedCanSeeLocation: (map['trackedCanSeeLocation'] as bool?) ?? false,
+        trackedCanSeeZones: (map['trackedCanSeeZones'] as bool?) ?? false,
       );
 
   String otherDeviceId(String myDeviceId) =>

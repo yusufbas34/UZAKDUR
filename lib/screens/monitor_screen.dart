@@ -766,7 +766,12 @@ class _MonitorScreenState extends State<MonitorScreen>
       ));
     }
 
-    if (_focusedPairId != null) {
+    // Uzaklaştırılan taraf, admin panelden istisnai olarak izin verilmedikçe
+    // hangi bölgelerin/güzergahların tanımlı olduğunu haritada GÖRMEZ —
+    // yaklaşınca/girince yine de alarm/uyarı almaya devam eder (bkz.
+    // _checkDistance), sadece görsel olarak gizli kalır.
+    final canSeeZones = _isProtected || (_pair?.trackedCanSeeZones ?? false);
+    if (_focusedPairId != null && canSeeZones) {
       final zones = _zonesByPair[_focusedPairId] ?? const <ZoneData>[];
       for (final z in zones) {
         if (z.type == 'route') {
