@@ -756,9 +756,9 @@ html[data-mode="tactical"] .ops-card-map.map-fullscreen {
 html[data-mode="tactical"] .ops-card-list, html[data-mode="tactical"] .ops-card-feed {
     position:absolute; top:16px; bottom:16px; width:300px; z-index:2; margin:0;
     display:flex; flex-direction:column; overflow:hidden; padding-top:44px;
-    transition: width .25s cubic-bezier(.4,0,.2,1), padding .25s ease;
+    transition: height .25s cubic-bezier(.4,0,.2,1), padding .25s ease;
   }
-html[data-mode="tactical"] .ops-card-list { left:16px; transition: width .25s cubic-bezier(.4,0,.2,1), padding .25s ease, left .25s cubic-bezier(.4,0,.2,1); }
+html[data-mode="tactical"] .ops-card-list { left:16px; transition: height .25s cubic-bezier(.4,0,.2,1), padding .25s ease, left .25s cubic-bezier(.4,0,.2,1); }
 html[data-mode="tactical"] .ops-card-feed { right:16px; }
 /* Yönetim paneli (sidebar) açıkken sol taraftaki Operasyon Panosu'nun
    üzerine biniyor — sidebar açıksa listeyi onun sağına kaydır. */
@@ -777,7 +777,7 @@ html[data-mode="tactical"] .panel-collapse-btn {
 html[data-mode="tactical"] .panel-collapse-btn:hover { background:var(--surface-hover); color:var(--accent); }
 @media (min-width: 1181px) {
 html[data-mode="tactical"] .ops-card-list.panel-collapsed, html[data-mode="tactical"] .ops-card-feed.panel-collapsed {
-    width:40px; padding:44px 4px 8px;
+    bottom:auto; height:44px; padding:0;
   }
 html[data-mode="tactical"] #tabPanel_ops .ops-card-list.panel-collapsed > .row, html[data-mode="tactical"] #tabPanel_ops .ops-card-list.panel-collapsed > #opsBody,
 html[data-mode="tactical"] #tabPanel_ops .ops-card-feed.panel-collapsed > .row, html[data-mode="tactical"] #tabPanel_ops .ops-card-feed.panel-collapsed > .feed-tabs, html[data-mode="tactical"] #tabPanel_ops .ops-card-feed.panel-collapsed > #liveFeedPanel {
