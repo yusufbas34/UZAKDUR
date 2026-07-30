@@ -27,6 +27,7 @@ dependencies:
   crypto: ^3.0.3
   http: ^1.1.0
   workmanager: ^0.5.2
+  local_auth: ^2.2.0
 
 dev_dependencies:
   flutter_test:

@@ -99,7 +99,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       await p.setString('device_id', deviceId);
       await p.setString('device_name', name);
       await p.setString('device_role', _role!);
-      if (_role == kRoleProtected && _disguise) {
+      if (_disguise) {
         await DisguiseService.apply();
         await p.setBool('app_disguised', true);
       }
@@ -419,7 +419,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         const SizedBox(height: 8),
         Text('Not: Girdiğin e-posta zaten kayıtlıysa ve şifre doğruysa, rol seçimi dikkate alınmadan doğrudan mevcut hesabına giriş yapılır.',
             style: GoogleFonts.inter(fontSize: 11, color: AppColors.textDisabled, height: 1.4)),
-        if (_role == kRoleProtected) ...[
+        if (_role != null) ...[
           const SizedBox(height: 16),
           GestureDetector(
             onTap: () => setState(() => _disguise = !_disguise),
@@ -443,6 +443,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ]),
             ),
           ),
+        ],
+        if (_role == kRoleProtected) ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),

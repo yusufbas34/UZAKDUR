@@ -7,13 +7,15 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.view.KeyEvent;
 import androidx.annotation.NonNull;
-import io.flutter.embedding.android.FlutterActivity;
+import io.flutter.embedding.android.FlutterFragmentActivity;
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.plugin.common.MethodChannel;
 import java.util.ArrayDeque;
 import java.util.Deque;
 
-public class MainActivity extends FlutterActivity {
+// local_auth'un biyometrik istemi (AndroidX Biometric) bir FragmentActivity
+// gerektiriyor — düz FlutterActivity ile çalışmaz.
+public class MainActivity extends FlutterFragmentActivity {
     private static final String CHANNEL = "uzakdur/disguise";
     private static final String PANIC_CHANNEL = "uzakdur/panic_keys";
     private static final String DEVICE_ADMIN_CHANNEL = "uzakdur/device_admin";

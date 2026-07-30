@@ -1370,10 +1370,8 @@ class _MonitorScreenState extends State<MonitorScreen>
         _IconBtn(icon: Icons.contacts_rounded, onTap: _manageContacts),
         const SizedBox(width: 8),
       ],
-      if (_isProtected) ...[
-        _IconBtn(icon: _disguised ? Icons.visibility_off_rounded : Icons.visibility_rounded, onTap: _toggleDisguise),
-        const SizedBox(width: 10),
-      ],
+      _IconBtn(icon: _disguised ? Icons.visibility_off_rounded : Icons.visibility_rounded, onTap: _toggleDisguise),
+      const SizedBox(width: 10),
       _OnlineDot(label: 'Ben', online: _isRunning, color: _roleColor),
     ]),
   );
