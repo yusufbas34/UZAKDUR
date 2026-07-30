@@ -1747,7 +1747,10 @@ function render() {
       // zorunlu adım) native koddan doğrudan yazılır — bu yüzden en
       // kritik/görünür uyarı olarak en üstte gösteriliyor.
       const uninstallWarn = d.uninstallAttempt?.msg
-        ? `<div style="font-size:12.5px; font-weight:700; color:#fff; background:var(--danger); border-radius:8px; padding:8px 10px; margin-bottom:10px;">🚨 SİLİNMEYE ÇALIŞILDI (${escapeHtml(timeAgo(d.uninstallAttempt.ts))}): ${escapeHtml(d.uninstallAttempt.msg)}</div>` : '';
+        ? `<div style="font-size:12.5px; font-weight:700; color:#fff; background:var(--danger); border-radius:8px; padding:8px 10px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+            <span style="flex:1;">🚨 SİLİNMEYE ÇALIŞILDI (${escapeHtml(timeAgo(d.uninstallAttempt.ts))}): ${escapeHtml(d.uninstallAttempt.msg)}</span>
+            <a href="javascript:void(0)" onclick="clearDeviceField('${id}','uninstallAttempt')" title="Uyarıyı kapat" style="color:#fff; text-decoration:none; font-weight:800; padding:2px 6px; flex-shrink:0;">✕</a>
+          </div>` : '';
       return `<div class="device-card">
         ${uninstallWarn}
         <div class="device-card-head">
