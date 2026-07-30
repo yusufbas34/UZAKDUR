@@ -74,16 +74,32 @@
     background:var(--danger); color:#fff; border-radius:100px; padding:1px 7px;
     font-size:10.5px; font-weight:800;
   }html:not([data-mode="light"]):not([data-mode="tactical"]) .sidebar-footer { border-top:1px solid var(--border); padding-top:14px; margin-top:10px; display:flex; flex-direction:column; gap:10px; }html:not([data-mode="light"]):not([data-mode="tactical"]) .live-status { display:flex; align-items:center; font-size:11.5px; color:var(--text2); padding:0 8px; }html:not([data-mode="light"]):not([data-mode="tactical"]) .nav-notif-btn { width:100%; justify-content:center; display:flex; }/* Görünüm modu seçici: üç panel artık ayrı dosyalar değil, tek sayfada
-     anlık geçiş yapılabilen "mod"lar (Klasik/Komuta Merkezi/OPS-Takip). */
-  .mode-switch { display:flex; gap:6px; padding:0 8px; }.mode-btn {
-    flex:1; background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
-    border-radius:var(--radius-sm); padding:7px 0; font-size:14px; box-shadow:none; cursor:pointer;
-    transition:border-color .15s ease, color .15s ease;
-  }.mode-btn:hover { filter:none; transform:none; color:var(--text); border-color:var(--muted); }.mode-btn.active { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
-  /* OPS-Takip modunda kabuk 64px'lik dar bir ikon rayı — 3 mod butonu yan
-     yana sığmaz, dikey ve daha küçük olmaları gerekiyor. */
-  html[data-mode="tactical"] .mode-switch { flex-direction:column; padding:0; gap:8px; }
-  html[data-mode="tactical"] .mode-btn { flex:none; width:36px; height:36px; padding:0; font-size:13px; }html:not([data-mode="light"]):not([data-mode="tactical"]) .main-content { flex:1; min-width:0; padding:30px 32px 90px; max-width:1180px; }#errBanner, #tamperBanner, #criticalOnLoadBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }#errBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.35); color:var(--danger); }#tamperBanner { background:var(--warning-soft); border:1px solid rgba(245,158,11,.35); color:var(--warning); }#criticalOnLoadBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.4); color:var(--danger); font-weight:600; white-space:normal; }.stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:14px; margin-bottom:22px; }.stat-card {
+     anlık geçiş yapılabilen "mod"lar (Klasik/Komuta Merkezi/OPS-Takip).
+     Sidebar'ın içine gömülü değil, sağ üstte her zaman görünen sabit
+     (fixed) bir kontrol — hangi mod/sekme açık olursa olsun bulunabilir. */
+  .mode-switch-top {
+    position:fixed; top:14px; right:18px; z-index:200; display:flex; gap:6px;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm);
+    padding:6px; box-shadow:0 6px 20px rgba(0,0,0,.18);
+  }
+  .mode-btn {
+    background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
+    border-radius:var(--radius-sm); width:34px; height:34px; padding:0; font-size:15px; box-shadow:none; cursor:pointer;
+    transition:border-color .15s ease, color .15s ease; display:flex; align-items:center; justify-content:center;
+  }
+  .mode-btn:hover { filter:none; transform:none; color:var(--text); border-color:var(--muted); }
+  .mode-btn.active { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+  @media (max-width: 880px) {
+    /* Sabit (fixed) konumda masaüstünde sorun yok ama mobilde üst
+       istatistik kartlarının üstüne biniyordu — mobilde normal akışa
+       alıp sayfanın en tepesinde, içeriği aşağı iten sıradan bir satır
+       yapıyoruz; böylece hiçbir şeyin üstüne binmiyor. */
+    .mode-switch-top {
+      position:static; align-self:flex-end; margin:10px 12px 0 auto;
+      padding:4px; gap:4px;
+    }
+    .mode-btn { width:30px; height:30px; font-size:14px; }
+  }html:not([data-mode="light"]):not([data-mode="tactical"]) .main-content { flex:1; min-width:0; padding:30px 32px 90px; max-width:1180px; }#errBanner, #tamperBanner, #criticalOnLoadBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }#errBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.35); color:var(--danger); }#tamperBanner { background:var(--warning-soft); border:1px solid rgba(245,158,11,.35); color:var(--warning); }#criticalOnLoadBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.4); color:var(--danger); font-weight:600; white-space:normal; }.stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:14px; margin-bottom:22px; }.stat-card {
     background: var(--surface);
     border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px;
     box-shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 24px rgba(0,0,0,.35);
@@ -217,7 +233,7 @@ html[data-mode="light"] .sidebar {
     flex-shrink:0; position:sticky; top:0; z-index:40;
     display:flex; flex-direction:row; align-items:center; gap:18px;
     background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
-    border-bottom:1px solid var(--border); padding:12px 26px;
+    border-bottom:1px solid var(--border); padding:12px 175px 12px 26px;
   }
 html[data-mode="light"] .brand { display:flex; align-items:center; gap:11px; flex-shrink:0; }
 html[data-mode="light"] .logo {
@@ -845,6 +861,11 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
 </div>
 
 <div class="app-shell" id="app" style="display:none;">
+<div class="mode-switch-top" title="Görünüm modu">
+  <button class="mode-btn" data-set-mode="dark" title="Klasik (Koyu)" onclick="setUzakdurMode('dark')">🌑</button>
+  <button class="mode-btn" data-set-mode="light" title="Komuta Merkezi (Açık)" onclick="setUzakdurMode('light')">☀️</button>
+  <button class="mode-btn" data-set-mode="tactical" title="OPS//TAKİP (Taktik)" onclick="setUzakdurMode('tactical')">🎯</button>
+</div>
 <aside class="sidebar">
   <div class="brand" title="UZAKDUR — Yönetici Paneli">
     <div class="logo">📡</div>
@@ -859,11 +880,6 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
     <button class="nav-item" id="mainTab_requests" title="Talepler" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDot">0</span></button>
   </nav>
   <div class="sidebar-footer">
-    <div class="mode-switch" title="Görünüm modu">
-      <button class="mode-btn" data-set-mode="dark" title="Klasik (Koyu)" onclick="setUzakdurMode('dark')">🌑</button>
-      <button class="mode-btn" data-set-mode="light" title="Komuta Merkezi (Açık)" onclick="setUzakdurMode('light')">☀️</button>
-      <button class="mode-btn" data-set-mode="tactical" title="OPS//TAKİP (Taktik)" onclick="setUzakdurMode('tactical')">🎯</button>
-    </div>
     <div class="live-status" title="Canlı izleniyor"><span id="liveDot"></span><span class="live-label">Canlı izleniyor</span></div>
     <button class="secondary nav-notif-btn" id="notifBtn" title="Bildirimleri Aç" onclick="enableNotifications()">🔔 <span class="notif-label">Bildirimleri Aç</span></button>
   </div>
