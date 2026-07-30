@@ -408,8 +408,23 @@ class LocationService {
       });
 
   // --- Location ---
-  static Future<void> writeLocation(String deviceId, double lat, double lon) =>
-      _db.child('locations/$deviceId').set({'lat': lat, 'lon': lon, 'ts': DateTime.now().millisecondsSinceEpoch});
+  // Konum alma SIKLIĞI hiç değişmedi — her zaten yapılan güncellemede,
+  // "şu anki konum" tekil kaydının yanına aynı noktayı bir de değişmez bir
+  // rota geçmişine ekliyoruz (ts anahtarlı, tarih sırasına göre doğal
+  // sıralanır). Amaç: ihlal anında değil, SÜREKLİ bir hareket izi tutup
+  // admin panelinde haritada göstermek — kanıt değerini artırır. Eski
+  // kayıtların silinmesi (saklama süresi) telefonda değil, Apps Script'te
+  // (pruneLocationHistory) yapılıyor ki bu ekstra bir okuma/pil maliyeti
+  // getirmesin.
+  static Future<void> writeLocation(String deviceId, double lat, double lon) async {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final point = {'lat': lat, 'lon': lon, 'ts': ts};
+    await _db.child('locations/$deviceId').set(point);
+    // En iyi çaba (fire-and-forget): rota geçmişi yazımı — mesela henüz bu
+    // yeni yol için Firebase güvenlik kuralı güncellenmediyse — asla asıl
+    // konum yazımını ya da onu bekleyen mesafe/alarm kontrolünü BOZMAMALI.
+    unawaited(_db.child('location_history/$deviceId/$ts').set(point).catchError((_) {}));
+  }
 
   static Future<LocationData?> getLocationOnce(String deviceId) async {
     final snap = await _db.child('locations/$deviceId').get();

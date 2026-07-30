@@ -996,6 +996,13 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
       </label>
     </div>
     <small class="hint">Varsayılan olarak kapalıdır — uzaklaştırılan taraf bölgelere/güzergahlara yaklaşınca yine uyarı alır, ama haritada nerede olduklarını göremez. Bunu yalnızca gerçek bir istisnai gereksinim varsa aç.</small>
+    <div class="row" style="margin-top:8px;">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; color:var(--text2);">
+        <input type="checkbox" id="detailShowRouteHistory" onchange="toggleRouteHistory(this.checked)"/>
+        Rota geçmişini (son 7 gün) haritada göster
+      </label>
+    </div>
+    <small class="hint">Telefonlar konumu her güncellediğinde (sıklık değişmedi) o nokta kalıcı bir rota izine de ekleniyor — kanıt için hareket geçmişini görmek istediğinde burayı aç. Yer kaplamasın diye 7 günden eski noktalar otomatik siliniyor.</small>
     <div id="detailReq"></div>
 
     <div class="row" style="justify-content:space-between; margin-top:20px;">
@@ -1270,6 +1277,7 @@ async function requestLocationNow(deviceId) {
 
 let devices = {}, pairs = {}, locations = {}, alarmLogAll = {};
 let detailMapObj = null, detailMarkers = [], detailCircle = null, detailCautionCircle = null, detailSinirCircle = null, detailZoneLayers = [], openPairId = null, detailMapFitted = false;
+let detailRouteLayers = [], showRouteHistory = false;
 let zonePickerMapObj = null, zonePickerMarker = null, zonePickerLatLng = null;
 let zonePickerMode = 'circle'; // 'circle' | 'route'
 let routePoints = [], routePolyline = null, routePointMarkers = [];
@@ -2187,6 +2195,9 @@ function openDetail(pairId) {
   document.getElementById('detailThreshold').value = p.threshold;
   document.getElementById('detailTrackedCanSeeLoc').checked = !!p.trackedCanSeeLocation;
   document.getElementById('detailTrackedCanSeeZones').checked = !!p.trackedCanSeeZones;
+  document.getElementById('detailShowRouteHistory').checked = false;
+  showRouteHistory = false;
+  clearRouteHistoryLayers();
   const reqEl = document.getElementById('detailReq');
   reqEl.innerHTML = p.distanceRequest ? `<div class="row" style="margin-top:10px;">
       <span class="req">⚠ Talep: ${p.distanceRequest.value}m</span>
@@ -2520,6 +2531,47 @@ function updateDetailMap() {
     else detailMapObj.setView([41.0082, 28.9784], 6);
     if (pts.length > 0) detailMapFitted = true;
   }
+}
+
+function toggleRouteHistory(checked) {
+  showRouteHistory = checked;
+  if (checked) loadRouteHistory();
+  else clearRouteHistoryLayers();
+}
+
+function clearRouteHistoryLayers() {
+  if (!detailMapObj) return;
+  detailRouteLayers.forEach(l => detailMapObj.removeLayer(l));
+  detailRouteLayers = [];
+}
+
+// "Rota geçmişini göster" işaretlenince bir kerelik çekilir (her 3sn'lik
+// canlı yenilemede tekrar tekrar çekmiyoruz — location_history büyük
+// olabilir, gereksiz Firebase okuması/pil maliyeti). Tekrar görmek için
+// kutuyu kapatıp açman yeterli.
+async function loadRouteHistory() {
+  const pairIdAtStart = openPairId;
+  const p = pairs[openPairId];
+  if (!p || !detailMapObj) return;
+  clearRouteHistoryLayers();
+  const [pHistory, tHistory] = await Promise.all([
+    fetchJSON(`location_history/${p.protectedDeviceId}`),
+    fetchJSON(`location_history/${p.trackedDeviceId}`),
+  ]);
+  if (!showRouteHistory || openPairId !== pairIdAtStart) return; // kutu ya da vaka bu arada değiştiyse çizme
+  const draw = (history, color, label) => {
+    if (!history) return;
+    const pts = Object.values(history)
+      .filter(pt => pt && typeof pt.lat === 'number' && typeof pt.lon === 'number')
+      .sort((a, b) => a.ts - b.ts)
+      .map(pt => [pt.lat, pt.lon]);
+    if (pts.length < 2) return;
+    const line = L.polyline(pts, { color, weight: 3, opacity: .6, dashArray: '1,7', lineCap: 'round' })
+      .addTo(detailMapObj).bindPopup(`${label} — ${pts.length} nokta (son 7 gün)`);
+    detailRouteLayers.push(line);
+  };
+  draw(pHistory, mc('safe'), '🛡️ Korunan rotası');
+  draw(tHistory, mc('danger'), '🎯 Uzaklaştırılan rotası');
 }
 
 async function loadDetailHistory(pairId) {

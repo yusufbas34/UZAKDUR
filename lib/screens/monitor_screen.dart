@@ -666,6 +666,17 @@ class _MonitorScreenState extends State<MonitorScreen>
     }
   }
 
+  // Tam alarm ekranında (korunan tarafta) tek dokunuşla 112'yi arar.
+  // Kayıtlı kişilere haber vermenin ötesinde, resmi elektronik izleme
+  // sistemlerindeki "ihlal anında güvenlik birimleri devreye girer"
+  // mantığının en pratik karşılığı — gerçek bir 112 entegrasyonu değil,
+  // sadece tek dokunuşla arama başlatıyor.
+  Future<void> _call112() async {
+    HapticFeedback.heavyImpact();
+    final uri = Uri(scheme: 'tel', path: '112');
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
+
   Future<void> _triggerPanic() async {
     if (_pairs.isEmpty || _panicSending) return;
     setState(() => _panicSending = true);
@@ -1532,21 +1543,35 @@ class _MonitorScreenState extends State<MonitorScreen>
   );
 
   Widget _buildBottom() {
-    if (_isAlarm) return GestureDetector(
-      onTap: _snoozeAlarm,
-      child: AnimatedBuilder(
-        animation: _alarmAnim,
-        builder: (_, __) => Container(
-          width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 18),
-          color: Color.lerp(const Color(0xFFCC0000), AppColors.danger, _alarmAnim.value),
+    if (_isAlarm) return Column(mainAxisSize: MainAxisSize.min, children: [
+      GestureDetector(
+        onTap: _snoozeAlarm,
+        child: AnimatedBuilder(
+          animation: _alarmAnim,
+          builder: (_, __) => Container(
+            width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 18),
+            color: Color.lerp(const Color(0xFFCC0000), AppColors.danger, _alarmAnim.value),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.volume_off_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Text('ALARMI DURDUR', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1)),
+            ]),
+          ),
+        ),
+      ),
+      if (_isProtected) GestureDetector(
+        onTap: _call112,
+        child: Container(
+          width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 14),
+          color: const Color(0xFF7A0000),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.volume_off_rounded, color: Colors.white, size: 20),
-            const SizedBox(width: 10),
-            Text('ALARMI DURDUR', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1)),
+            const Icon(Icons.local_phone_rounded, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text('112\'Yİ ARA', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1)),
           ]),
         ),
       ),
-    );
+    ]);
 
     return Container(
       height: 140, padding: const EdgeInsets.all(16),
