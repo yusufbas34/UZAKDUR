@@ -85,6 +85,9 @@
   /* Taktik modun açılır/kapanır yönetim paneli düğmesi — sadece o modda
      görünür, diğer modlarda sidebar zaten sabit bir sütun olduğu için gerek yok. */
   .tactical-sidebar-toggle { display:none; }
+  /* Taktik modun Operasyon Panosu/Canlı Akış panellerini daraltan düğme —
+     sadece taktik modda kullanılıyor, diğer modlarda panel zaten normal akışta. */
+  .panel-collapse-btn { display:none; }
   .mode-btn {
     background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
     border-radius:var(--radius-sm); width:34px; height:34px; padding:0; font-size:15px; box-shadow:none; cursor:pointer;
@@ -752,12 +755,35 @@ html[data-mode="tactical"] .ops-card-map.map-fullscreen {
   }
 html[data-mode="tactical"] .ops-card-list, html[data-mode="tactical"] .ops-card-feed {
     position:absolute; top:16px; bottom:16px; width:300px; z-index:2; margin:0;
-    display:flex; flex-direction:column; overflow:hidden;
+    display:flex; flex-direction:column; overflow:hidden; padding-top:44px;
+    transition: width .25s cubic-bezier(.4,0,.2,1), padding .25s ease;
   }
-html[data-mode="tactical"] .ops-card-list { left:16px; }
+html[data-mode="tactical"] .ops-card-list { left:16px; transition: width .25s cubic-bezier(.4,0,.2,1), padding .25s ease, left .25s cubic-bezier(.4,0,.2,1); }
 html[data-mode="tactical"] .ops-card-feed { right:16px; }
+/* Yönetim paneli (sidebar) açıkken sol taraftaki Operasyon Panosu'nun
+   üzerine biniyor — sidebar açıksa listeyi onun sağına kaydır. */
+html[data-mode="tactical"] .sidebar:not(.sidebar-collapsed) ~ main .ops-card-list { left:266px; }
 html[data-mode="tactical"] #opsBody, html[data-mode="tactical"] #liveFeedPanel { flex:1; overflow-y:auto; min-height:0; }
 html[data-mode="tactical"] .ops-scroll { max-height:none; overflow-y:visible; }
+/* Operasyon Panosu / Canlı Akış panelleri — kullanıcı isteğiyle daraltılıp
+   genişletilebiliyor, daraltıldığında harita neredeyse tam ekran kalıyor. */
+html[data-mode="tactical"] .panel-collapse-btn {
+    position:absolute; top:8px; left:8px; right:8px; width:auto; height:28px;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:1px solid var(--border-soft); color:var(--text2);
+    cursor:pointer; font-size:16px; font-weight:700; border-radius:8px; z-index:3;
+    transition: background .12s ease, color .12s ease;
+  }
+html[data-mode="tactical"] .panel-collapse-btn:hover { background:var(--surface-hover); color:var(--accent); }
+@media (min-width: 1181px) {
+html[data-mode="tactical"] .ops-card-list.panel-collapsed, html[data-mode="tactical"] .ops-card-feed.panel-collapsed {
+    width:40px; padding:44px 4px 8px;
+  }
+html[data-mode="tactical"] #tabPanel_ops .ops-card-list.panel-collapsed > .row, html[data-mode="tactical"] #tabPanel_ops .ops-card-list.panel-collapsed > #opsBody,
+html[data-mode="tactical"] #tabPanel_ops .ops-card-feed.panel-collapsed > .row, html[data-mode="tactical"] #tabPanel_ops .ops-card-feed.panel-collapsed > .feed-tabs, html[data-mode="tactical"] #tabPanel_ops .ops-card-feed.panel-collapsed > #liveFeedPanel {
+    display:none;
+  }
+}
 @keyframes tacticalScan { 0%{ top:0%; opacity:0; } 8%{ opacity:.8; } 92%{ opacity:.8; } 100%{ top:100%; opacity:0; } }
 @media (max-width: 1180px) {
 html[data-mode="tactical"] #tabPanel_ops { display:block; position:static; height:auto; min-height:0; overflow:visible; }
@@ -771,7 +797,9 @@ html[data-mode="tactical"] .ops-card-map > .row {
     position:static; transform:none; background:transparent; border:none; padding:0; margin:0 0 6px !important; width:100%;
   }
 html[data-mode="tactical"] #opsBody, html[data-mode="tactical"] #liveFeedPanel { flex:none; overflow-y:visible; max-height:none; min-height:0; }
-html[data-mode="tactical"] .ops-card-map #allCasesMap { height:420px; }}
+html[data-mode="tactical"] .ops-card-map #allCasesMap { height:420px; }
+html[data-mode="tactical"] .panel-collapse-btn { display:none; }
+html[data-mode="tactical"] .ops-card-list.panel-collapsed, html[data-mode="tactical"] .ops-card-feed.panel-collapsed { width:100%; padding:22px; }}
 html[data-mode="tactical"] .ops-row { cursor:pointer; }
 html[data-mode="tactical"] .led { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:8px; flex-shrink:0; }
 html[data-mode="tactical"] .led.acil { background:var(--danger); box-shadow:0 0 9px rgba(255,59,59,.7); animation: pulse .9s ease-in-out infinite; }
@@ -952,7 +980,8 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
   </div>
 
   <div id="tabPanel_ops">
-    <div class="card ops-card-list ops-scroll">
+    <div class="card ops-card-list ops-scroll" id="opsListCard">
+      <button type="button" class="panel-collapse-btn" onclick="togglePanelCollapse('opsListCard')" title="Paneli daralt/genişlet">−</button>
       <div class="row" style="justify-content:space-between;">
         <h2 style="margin:0;">🎯 Operasyon Panosu</h2>
         <input type="text" id="opsSearch" class="ops-search-input" placeholder="İsimle ara…" oninput="render()"/>
@@ -960,7 +989,8 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
       <div id="opsBody"><div class="empty">Yükleniyor…</div></div>
     </div>
 
-    <div class="card ops-card-feed ops-scroll">
+    <div class="card ops-card-feed ops-scroll" id="feedListCard">
+      <button type="button" class="panel-collapse-btn" onclick="togglePanelCollapse('feedListCard')" title="Paneli daralt/genişlet">−</button>
       <div class="row" style="justify-content:space-between; margin-bottom:6px;">
         <h2 style="margin:0;">Canlı Akış</h2>
         <input type="date" id="feedDate" class="feed-date-input" onchange="renderLiveFeed()"/>
@@ -1204,6 +1234,14 @@ function addTileLayer(map) {
 function setUzakdurMode(mode) {
   try { localStorage.setItem('uzakdurMode', mode); } catch (e) {}
   location.reload();
+}
+function togglePanelCollapse(cardId) {
+  const el = document.getElementById(cardId);
+  if (!el) return;
+  const collapsed = el.classList.toggle('panel-collapsed');
+  const btn = el.querySelector('.panel-collapse-btn');
+  if (btn) btn.textContent = collapsed ? '+' : '−';
+  setTimeout(() => { if (allCasesMapObj) allCasesMapObj.invalidateSize(); }, 260);
 }
 function toggleTacticalSidebar() {
   const sidebar = document.querySelector('.sidebar');
