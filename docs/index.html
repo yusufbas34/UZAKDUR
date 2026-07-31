@@ -99,6 +99,14 @@
   }
   .mode-btn:hover { filter:none; transform:none; color:var(--text); border-color:var(--muted); }
   .mode-btn.active { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
+  /* Harita fayans/görünüm stili seçici — moddan bağımsız, tüm haritalara
+     (tüm vakalar/detay/bölge seçici) uygulanır, mode-switch-top ile aynı sırada. */
+  .map-style-select {
+    background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
+    border-radius:var(--radius-sm); height:34px; padding:0 8px; font-size:12px; cursor:pointer;
+    max-width:120px;
+  }
+  .map-style-select:hover { color:var(--text); border-color:var(--muted); }
   @media (max-width: 880px) {
     /* Sabit (fixed) konumda masaüstünde sorun yok ama mobilde üst
        istatistik kartlarının üstüne biniyordu — mobilde normal akışa
@@ -109,6 +117,7 @@
       padding:4px; gap:4px;
     }
     .mode-btn { width:30px; height:30px; font-size:14px; }
+    .map-style-select { height:30px; font-size:11px; max-width:88px; }
   }html:not([data-mode="light"]):not([data-mode="tactical"]) .main-content { flex:1; min-width:0; padding:30px 32px 90px; max-width:1180px; }#errBanner, #tamperBanner, #criticalOnLoadBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }#errBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.35); color:var(--danger); }#tamperBanner { background:var(--warning-soft); border:1px solid rgba(245,158,11,.35); color:var(--warning); }#criticalOnLoadBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.4); color:var(--danger); font-weight:600; white-space:normal; }.stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:14px; margin-bottom:22px; }.stat-card {
     background: var(--surface);
     border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px;
@@ -241,7 +250,7 @@ html[data-mode="light"] .sidebar {
     flex-shrink:0; position:sticky; top:0; z-index:40;
     display:flex; flex-direction:row; align-items:center; gap:18px;
     background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
-    border-bottom:1px solid var(--border); padding:12px 175px 12px 26px;
+    border-bottom:1px solid var(--border); padding:12px 280px 12px 26px;
   }
 html[data-mode="light"] .brand { display:flex; align-items:center; gap:11px; flex-shrink:0; }
 html[data-mode="light"] .logo {
@@ -547,8 +556,13 @@ html[data-mode="tactical"] body {
       radial-gradient(900px 500px at 50% 115%, rgba(52,211,153,.05), transparent 60%);
     background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
-html[data-mode="tactical"] .app-shell { display:flex; flex-direction:row; min-height:100vh; }
+html[data-mode="tactical"] .app-shell { display:flex; flex-direction:row; min-height:100vh; overflow-x:hidden; }
+/* Sidebar kayarak açılıp kapanırken (transform + backdrop-filter birlikte)
+   bazı tarayıcılarda geçici bir render artığı/bulanıklık bırakabiliyor —
+   kendi katmanında composite edilmesini zorlayıp bunu önlüyoruz. */
+html[data-mode="tactical"] .sidebar { will-change: transform; }
 html[data-mode="tactical"] .sidebar {
     width:250px; flex-shrink:0; position:fixed; top:0; left:0; height:100vh; z-index:150;
     display:flex; flex-direction:column; justify-content:space-between; align-items:stretch; gap:0;
@@ -959,6 +973,14 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
   <button class="mode-btn" data-set-mode="dark" title="Klasik (Koyu)" onclick="setUzakdurMode('dark')">🌑</button>
   <button class="mode-btn" data-set-mode="light" title="Komuta Merkezi (Açık)" onclick="setUzakdurMode('light')">☀️</button>
   <button class="mode-btn" data-set-mode="tactical" title="OPS//TAKİP (Taktik)" onclick="setUzakdurMode('tactical')">🎯</button>
+  <select id="mapStyleSelect" class="map-style-select" title="Harita görünümü" onchange="setMapStyle(this.value)">
+    <option value="auto">🗺️ Otomatik</option>
+    <option value="osm">🛣️ Sokak</option>
+    <option value="voyager">☀️ Açık Renkli</option>
+    <option value="dark">🌑 Koyu</option>
+    <option value="satellite">🛰️ Uydu</option>
+    <option value="terrain">⛰️ Arazi</option>
+  </select>
 </div>
 <aside class="sidebar">
   <div class="brand" title="UZAKDUR — Yönetici Paneli">
@@ -1246,9 +1268,27 @@ function currentMode() {
 function mc(key) {
   return MODE_COLORS[currentMode()][key];
 }
+// Harita fayans stili artık moddan bağımsız olarak da seçilebiliyor —
+// "auto" seçiliyse (varsayılan) mevcut mod hangi fayansı kullanıyorsa o
+// uygulanır, aksi halde kullanıcının seçtiği stil tüm haritalarda geçerli olur.
+const TILE_STYLES = {
+  osm: { label: 'Sokak (OSM)', tileUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', tileOpts: { maxZoom: 19 } },
+  voyager: { label: 'Açık Renkli', tileUrl: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', tileOpts: { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' } },
+  dark: { label: 'Koyu', tileUrl: 'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', tileOpts: { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' } },
+  satellite: { label: 'Uydu', tileUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', tileOpts: { maxZoom: 19, attribution: 'Tiles &copy; Esri' } },
+  terrain: { label: 'Arazi', tileUrl: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', tileOpts: { maxZoom: 17, attribution: '&copy; OpenTopoMap (CC-BY-SA)' } },
+};
+function currentMapStyle() {
+  try { return localStorage.getItem('uzakdurMapStyle') || 'auto'; } catch (e) { return 'auto'; }
+}
 function addTileLayer(map) {
-  const m = MODE_COLORS[currentMode()];
-  L.tileLayer(m.tileUrl, m.tileOpts).addTo(map);
+  const style = currentMapStyle();
+  const t = (style !== 'auto' && TILE_STYLES[style]) ? TILE_STYLES[style] : MODE_COLORS[currentMode()];
+  L.tileLayer(t.tileUrl, t.tileOpts).addTo(map);
+}
+function setMapStyle(style) {
+  try { localStorage.setItem('uzakdurMapStyle', style); } catch (e) {}
+  location.reload();
 }
 function setUzakdurMode(mode) {
   try { localStorage.setItem('uzakdurMode', mode); } catch (e) {}
@@ -1272,6 +1312,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.mode-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.setMode === currentMode());
   });
+  const styleSelect = document.getElementById('mapStyleSelect');
+  if (styleSelect) styleSelect.value = currentMapStyle();
 });
 
 function tryLogin() {
