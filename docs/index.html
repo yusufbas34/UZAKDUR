@@ -89,6 +89,9 @@
      erişim kalsın diye her zaman görünür; diğer modlarda sidebar zaten
      sabit bir sütun olduğu için gerek yok. */
   .tactical-bottom-nav { display:none; }
+  /* Operasyon Panosu kartlarındaki detay aç/kapa düğmesi — sadece taktik
+     modda kullanılıyor, diğer modlarda kart zaten tüm detayları gösteriyor. */
+  .pair-card-expand-btn { display:none; }
   .mode-btn {
     background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
     border-radius:var(--radius-sm); width:34px; height:34px; padding:0; font-size:15px; box-shadow:none; cursor:pointer;
@@ -840,15 +843,26 @@ html[data-mode="tactical"] .table-wrap table { min-width:540px; }
 html[data-mode="tactical"] .pair-card {
     background:var(--surface-high); border:1px solid var(--border); border-radius:16px;
     padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease;
+    position:relative;
   }
 html[data-mode="tactical"] .pair-card:hover { border-color:#2E4550; box-shadow:0 6px 18px rgba(34,211,238,.12); }
-/* Operasyon Panosu listesi sadece isim/soyisim gösterecek şekilde
-   sadeleştirildi — durum, mesafe, pil ve aksiyon butonları detay
-   görünümünde (karta tıklanınca) zaten mevcut. */
-html[data-mode="tactical"] .pair-card-head, html[data-mode="tactical"] .pair-card-sub, html[data-mode="tactical"] .device-row {
+/* Operasyon Panosu listesi varsayılan olarak sadece isim/soyisim
+   gösteriyor — karttaki ⌄ düğmesine basınca durum/mesafe/pil/aksiyon
+   butonları da açılıp kapanabiliyor (yer paylaşımını korumak için). */
+html[data-mode="tactical"] .pair-card:not(.expanded) .pair-card-head,
+html[data-mode="tactical"] .pair-card:not(.expanded) .pair-card-sub,
+html[data-mode="tactical"] .pair-card:not(.expanded) .device-row {
     display:none;
   }
-html[data-mode="tactical"] .pair-card-title { font-family:var(--font-display); font-weight:700; font-size:14.5px; margin:0; }
+html[data-mode="tactical"] .pair-card-title { font-family:var(--font-display); font-weight:700; font-size:14.5px; margin:0; padding-right:30px; }
+html[data-mode="tactical"] .pair-card-expand-btn {
+    position:absolute; top:12px; right:12px; width:24px; height:24px; z-index:2;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--surface-hover); border:1px solid var(--border-soft); border-radius:8px;
+    color:var(--text2); font-size:12px; cursor:pointer; transition:transform .2s ease, background .12s ease, color .12s ease;
+  }
+html[data-mode="tactical"] .pair-card-expand-btn:hover { background:var(--surface); color:var(--accent); }
+html[data-mode="tactical"] .pair-card.expanded .pair-card-expand-btn { transform:rotate(180deg); }
 html[data-mode="tactical"] .device-row {
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     padding:11px 0; border-top:1px solid var(--border-soft); flex-wrap:wrap;
@@ -1715,6 +1729,12 @@ function deviceActionRow(icon, roleLabel, dev, devId, loc) {
     </div>`;
 }
 
+const expandedPairCards = new Set();
+function togglePairCardExpand(pairId, btn) {
+  const card = btn.closest('.pair-card');
+  const isExpanded = card.classList.toggle('expanded');
+  if (isExpanded) expandedPairCards.add(pairId); else expandedPairCards.delete(pairId);
+}
 function renderOpsBoard(pairIds) {
   const container = document.getElementById('opsBody');
   const q = (document.getElementById('opsSearch')?.value || '').trim().toLowerCase();
@@ -1735,7 +1755,9 @@ function renderOpsBoard(pairIds) {
     const distText = r.status === 'acil' && r.zone ? `🚫 ${escapeHtml(r.zone.label)}`
       : r.distance !== null ? `<span class="mono">${Math.round(r.distance)}m</span> — acil ${Math.round(p.threshold * 0.5)}m / kritik ${Math.round(p.threshold * 0.8)}m / sınır ${p.threshold}m`
       : 'Mesafe bilinmiyor';
-    return `<div class="pair-card" onclick="openDetail('${r.pairId}')">
+    const expandedClass = expandedPairCards.has(r.pairId) ? ' expanded' : '';
+    return `<div class="pair-card${expandedClass}" onclick="openDetail('${r.pairId}')">
+      <button type="button" class="pair-card-expand-btn" onclick="event.stopPropagation(); togglePairCardExpand('${r.pairId}', this)" title="Detayları göster/gizle">⌄</button>
       <div class="pair-card-head">
         <div class="pair-card-status"><span class="led ${r.status}"></span><span class="status-label ${r.status}">${STATUS_LABEL[r.status]}</span></div>
         <div class="pair-card-dist">${distText}</div>
