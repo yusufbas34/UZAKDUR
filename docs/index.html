@@ -82,9 +82,6 @@
     background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm);
     padding:6px; box-shadow:0 6px 20px rgba(0,0,0,.18);
   }
-  /* Taktik modun açılır/kapanır yönetim paneli düğmesi — sadece o modda
-     görünür, diğer modlarda sidebar zaten sabit bir sütun olduğu için gerek yok. */
-  .tactical-sidebar-toggle { display:none; }
   /* Taktik modun Operasyon Panosu/Canlı Akış panellerini daraltan düğme —
      sadece taktik modda kullanılıyor, diğer modlarda panel zaten normal akışta. */
   .panel-collapse-btn { display:none; }
@@ -559,28 +556,10 @@ html[data-mode="tactical"] body {
     overflow-x: hidden;
   }
 html[data-mode="tactical"] .app-shell { display:flex; flex-direction:row; min-height:100vh; overflow-x:hidden; }
-/* Sidebar kayarak açılıp kapanırken (transform + backdrop-filter birlikte)
-   bazı tarayıcılarda geçici bir render artığı/bulanıklık bırakabiliyor —
-   kendi katmanında composite edilmesini zorlayıp bunu önlüyoruz. */
-html[data-mode="tactical"] .sidebar { will-change: transform; }
-html[data-mode="tactical"] .sidebar {
-    width:250px; flex-shrink:0; position:fixed; top:0; left:0; height:100vh; z-index:150;
-    display:flex; flex-direction:column; justify-content:space-between; align-items:stretch; gap:0;
-    background: rgba(17,24,39,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    border-right:1px solid var(--border); padding:0;
-    box-shadow: 12px 0 40px rgba(0,0,0,.35);
-    transform:translateX(0); transition: transform .25s cubic-bezier(.4,0,.2,1);
-  }
-html[data-mode="tactical"] .sidebar.sidebar-collapsed { transform:translateX(-100%); }
-html[data-mode="tactical"] .tactical-sidebar-toggle {
-    display:flex; align-items:center; justify-content:center;
-    position:fixed; top:16px; left:16px; z-index:160; width:42px; height:42px;
-    background:rgba(17,24,39,.75); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-    border:1px solid var(--border); border-radius:12px; color:var(--text); font-size:17px;
-    cursor:pointer; transition: background .12s ease, left .25s ease;
-  }
-html[data-mode="tactical"] .tactical-sidebar-toggle:hover { background:var(--surface-hover); }
-html[data-mode="tactical"] .sidebar:not(.sidebar-collapsed) ~ .tactical-sidebar-toggle { left:266px; }
+/* Sol yönetim paneli (sidebar) taktik modda tamamen kaldırıldı — sekmeler
+   zaten her zaman görünen .tactical-bottom-nav'da, canlı durum/bildirim
+   düğmesi de oraya taşındı. */
+html[data-mode="tactical"] .sidebar { display:none; }
 html[data-mode="tactical"] .brand {
     display:flex; flex-direction:row; align-items:center; gap:12px; flex-shrink:0;
     height:80px; padding:0 22px; border-bottom:1px solid var(--border-soft);
@@ -603,14 +582,17 @@ html[data-mode="tactical"] .sidenav {
     display:none;
   }
 html[data-mode="tactical"] .tactical-bottom-nav {
-    display:flex; position:fixed; bottom:0; left:0; right:0; z-index:140;
-    gap:8px; padding:10px 18px; justify-content:center;
+    display:flex; align-items:center; position:fixed; bottom:0; left:0; right:0; z-index:140;
+    gap:8px; padding:10px 18px;
     background: rgba(17,24,39,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     border-top:1px solid var(--border);
   }
 html[data-mode="tactical"] .tactical-bottom-nav .nav-item {
     flex-direction:row; width:auto; flex:0 1 220px; justify-content:center;
   }
+html[data-mode="tactical"] .tactical-bottom-nav-spacer { flex:1; }
+html[data-mode="tactical"] .tactical-bottom-nav .live-status { flex-shrink:0; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-notif-btn { width:auto; flex-shrink:0; }
 html[data-mode="tactical"] .nav-item {
     display:flex; align-items:center; justify-content:flex-start; width:100%; height:auto;
     background:transparent; color:var(--text2); border:1px solid transparent; box-shadow:none;
@@ -746,7 +728,7 @@ html[data-mode="tactical"] .hist-row { display:flex; justify-content:space-betwe
 html[data-mode="tactical"] .hist-row:last-child { border-bottom:none; }
 html[data-mode="tactical"] .feed-row { font-size:12.5px; padding:9px 0; border-bottom:1px solid var(--border-soft); display:flex; justify-content:space-between; gap:10px; color:var(--text); }
 html[data-mode="tactical"] .feed-row:last-child { border-bottom:none; }
-html[data-mode="tactical"] #liveDot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:7px; box-shadow:0 0 8px rgba(34,255,136,.5); animation: pulse 1.4s ease-in-out infinite; }
+html[data-mode="tactical"] #liveDot, html[data-mode="tactical"] #liveDotBottom { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--safe); margin-right:7px; box-shadow:0 0 8px rgba(34,255,136,.5); animation: pulse 1.4s ease-in-out infinite; }
 html[data-mode="tactical"] .zone-pin { font-size:19px; text-align:center; line-height:22px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); background:none !important; border:none !important; }
 html[data-mode="tactical"] .map-label { background:var(--surface) !important; border:1px solid var(--border) !important; border-radius:8px !important; padding:2px 8px !important; font-size:11px !important; font-weight:700 !important; color:var(--text) !important; box-shadow:0 1px 6px rgba(0,0,0,.5); }
 html[data-mode="tactical"] .map-label.protected { border-color:rgba(34,255,136,.4) !important; color:var(--safe) !important; }
@@ -788,9 +770,6 @@ html[data-mode="tactical"] .ops-card-list, html[data-mode="tactical"] .ops-card-
   }
 html[data-mode="tactical"] .ops-card-list { left:16px; transition: height .25s cubic-bezier(.4,0,.2,1), padding .25s ease, left .25s cubic-bezier(.4,0,.2,1); }
 html[data-mode="tactical"] .ops-card-feed { right:16px; }
-/* Yönetim paneli (sidebar) açıkken sol taraftaki Operasyon Panosu'nun
-   üzerine biniyor — sidebar açıksa listeyi onun sağına kaydır. */
-html[data-mode="tactical"] .sidebar:not(.sidebar-collapsed) ~ main .ops-card-list { left:266px; }
 html[data-mode="tactical"] #opsBody, html[data-mode="tactical"] #liveFeedPanel { flex:1; overflow-y:auto; min-height:0; }
 html[data-mode="tactical"] .ops-scroll { max-height:none; overflow-y:visible; }
 /* Operasyon Panosu / Canlı Akış panelleri — kullanıcı isteğiyle daraltılıp
@@ -860,21 +839,16 @@ html[data-mode="tactical"] .table-wrap { overflow-x:auto; -webkit-overflow-scrol
 html[data-mode="tactical"] .table-wrap table { min-width:540px; }
 html[data-mode="tactical"] .pair-card {
     background:var(--surface-high); border:1px solid var(--border); border-radius:16px;
-    padding:16px; margin-bottom:12px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease;
+    padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease;
   }
 html[data-mode="tactical"] .pair-card:hover { border-color:#2E4550; box-shadow:0 6px 18px rgba(34,211,238,.12); }
-html[data-mode="tactical"] .pair-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:2px; }
-html[data-mode="tactical"] .pair-card-status {
-    display:flex; align-items:center; gap:6px; padding:4px 11px 4px 8px; border-radius:var(--radius-sm);
-    background: var(--surface-hover);
+/* Operasyon Panosu listesi sadece isim/soyisim gösterecek şekilde
+   sadeleştirildi — durum, mesafe, pil ve aksiyon butonları detay
+   görünümünde (karta tıklanınca) zaten mevcut. */
+html[data-mode="tactical"] .pair-card-head, html[data-mode="tactical"] .pair-card-sub, html[data-mode="tactical"] .device-row {
+    display:none;
   }
-html[data-mode="tactical"] .pair-card-status:has(.led.acil) { background:var(--danger-soft); }
-html[data-mode="tactical"] .pair-card-status:has(.led.kritik) { background:var(--warning-soft); }
-html[data-mode="tactical"] .pair-card-status:has(.led.sinir) { background:var(--accent-soft); }
-html[data-mode="tactical"] .pair-card-status:has(.led.safe) { background:var(--safe-soft); }
-html[data-mode="tactical"] .pair-card-dist { font-size:12.5px; color:var(--text2); }
-html[data-mode="tactical"] .pair-card-title { font-family:var(--font-display); font-weight:700; font-size:14.5px; margin:8px 0 2px; }
-html[data-mode="tactical"] .pair-card-sub { font-size:11px; color:var(--muted); margin-bottom:10px; }
+html[data-mode="tactical"] .pair-card-title { font-family:var(--font-display); font-weight:700; font-size:14.5px; margin:0; }
 html[data-mode="tactical"] .device-row {
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     padding:11px 0; border-top:1px solid var(--border-soft); flex-wrap:wrap;
@@ -921,22 +895,15 @@ html[data-mode="tactical"] .ack-dot.ack-ok { background:var(--safe); }
 html[data-mode="tactical"] .ack-dot.ack-pending { background:var(--warning); animation: pulse 1s ease-in-out infinite; }
 html[data-mode="tactical"] .ack-dot.ack-fail { background:var(--danger); }
 @media (max-width: 880px) {html[data-mode="tactical"] .app-shell { flex-direction:column; }
-html[data-mode="tactical"] .sidebar {
-      position:fixed; top:auto; bottom:0; left:0; right:0; width:100%; height:auto;
-      flex-direction:row; align-items:center; padding:6px 10px;
-      border-right:none; border-top:1px solid var(--border); z-index:100;
-      box-shadow: 0 -4px 20px rgba(0,0,0,.4);
-    }
-html[data-mode="tactical"] .brand { display:none; }
-html[data-mode="tactical"] .sidenav { flex-direction:row; flex:1; gap:2px; }
-html[data-mode="tactical"] .nav-item { flex-direction:column; flex:1; width:auto; height:auto; padding:7px 2px 6px; gap:3px; border-radius:10px; }
-html[data-mode="tactical"] .nav-label { display:block; flex:none; font-size:9.5px; text-align:center; line-height:1.2; }
-html[data-mode="tactical"] .nav-icon { font-size:17px; }
-html[data-mode="tactical"] .nav-item .req-dot { position:absolute; top:2px; right:14%; padding:0 5px; font-size:9px; }
-html[data-mode="tactical"] .sidebar-footer { flex-direction:row; border-top:none; padding-top:0; margin-top:0; gap:6px; }
-html[data-mode="tactical"] .live-status { display:none; }
-html[data-mode="tactical"] .nav-notif-btn { width:auto; height:auto; padding:9px; }
-html[data-mode="tactical"] .nav-notif-btn .notif-label { display:none; }
+html[data-mode="tactical"] .tactical-bottom-nav { padding:6px 8px; gap:4px; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-item { flex:1; flex-direction:column; padding:7px 2px 6px; gap:3px; border-radius:10px; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-label { display:block; font-size:9.5px; text-align:center; line-height:1.2; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-icon { font-size:17px; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-item .req-dot { position:absolute; top:2px; right:14%; padding:0 5px; font-size:9px; }
+html[data-mode="tactical"] .tactical-bottom-nav-spacer { display:none; }
+html[data-mode="tactical"] .tactical-bottom-nav .live-status { display:none; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-notif-btn { flex:none; width:auto; height:auto; padding:9px; }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-notif-btn .notif-label { display:none; }
 html[data-mode="tactical"] .main-content { padding:18px 12px 84px; margin-left:0; }
 html[data-mode="tactical"] h1 { font-size:15.5px; letter-spacing:0; }
 html[data-mode="tactical"] .stats-row { grid-template-columns: repeat(2, 1fr); gap:10px; margin-bottom:16px; }
@@ -1000,11 +967,13 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
     <button class="secondary nav-notif-btn" id="notifBtn" title="Bildirimleri Aç" onclick="enableNotifications()">🔔 <span class="notif-label">Bildirimleri Aç</span></button>
   </div>
 </aside>
-<button type="button" class="tactical-sidebar-toggle" id="tacticalSidebarToggle" title="Yönetim panelini aç/kapat" onclick="toggleTacticalSidebar()">☰</button>
 <nav class="tactical-bottom-nav">
   <button class="nav-item" id="mainTabBottom_ops" title="Operasyon" onclick="showMainTab('ops')"><span class="nav-icon">🎯</span><span class="nav-label">Operasyon</span></button>
   <button class="nav-item" id="mainTabBottom_devices" title="Cihazlar &amp; Eşleşmeler" onclick="showMainTab('devices')"><span class="nav-icon">📱</span><span class="nav-label">Cihazlar &amp; Eşleşmeler</span></button>
   <button class="nav-item" id="mainTabBottom_requests" title="Talepler" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDotBottom">0</span></button>
+  <div class="tactical-bottom-nav-spacer"></div>
+  <div class="live-status" title="Canlı izleniyor"><span id="liveDotBottom"></span><span class="live-label">Canlı izleniyor</span></div>
+  <button class="secondary nav-notif-btn" id="notifBtnBottom" title="Bildirimleri Aç" onclick="enableNotifications()">🔔 <span class="notif-label">Bildirimleri Aç</span></button>
 </nav>
 
 <main class="main-content">
@@ -1300,12 +1269,6 @@ function togglePanelCollapse(cardId) {
   const collapsed = el.classList.toggle('panel-collapsed');
   const btn = el.querySelector('.panel-collapse-btn');
   if (btn) btn.textContent = collapsed ? '+' : '−';
-  setTimeout(() => { if (allCasesMapObj) allCasesMapObj.invalidateSize(); }, 260);
-}
-function toggleTacticalSidebar() {
-  const sidebar = document.querySelector('.sidebar');
-  if (!sidebar) return;
-  sidebar.classList.toggle('sidebar-collapsed');
   setTimeout(() => { if (allCasesMapObj) allCasesMapObj.invalidateSize(); }, 260);
 }
 document.addEventListener('DOMContentLoaded', () => {
@@ -2176,7 +2139,10 @@ function enableNotifications() {
   if (!('Notification' in window)) { alert('Bu tarayıcı bildirimleri desteklemiyor.'); return; }
   Notification.requestPermission().then(async p => {
     notifEnabled = p === 'granted';
-    document.getElementById('notifBtn').textContent = notifEnabled ? '🔔 Bildirimler Açık' : '🔕 İzin verilmedi';
+    const notifLabel = notifEnabled ? '🔔 Bildirimler Açık' : '🔕 İzin verilmedi';
+    document.getElementById('notifBtn').textContent = notifLabel;
+    const notifBtnBottom = document.getElementById('notifBtnBottom');
+    if (notifBtnBottom) notifBtnBottom.textContent = notifLabel;
     if (notifEnabled) {
       showNotif('UZAKDUR Admin', { body: 'Canlı bildirimler etkinleştirildi.' });
       await registerPushToken();
