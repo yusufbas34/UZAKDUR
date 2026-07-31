@@ -103,8 +103,9 @@
      (tüm vakalar/detay/bölge seçici) uygulanır, mode-switch-top ile aynı sırada. */
   .map-style-select {
     background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
-    border-radius:var(--radius-sm); height:34px; padding:0 8px; font-size:12px; cursor:pointer;
-    max-width:130px; font-family:inherit;
+    border-radius:var(--radius-sm); height:34px; padding:0 6px; font-size:12px; cursor:pointer;
+    width:148px; flex-shrink:0; font-family:inherit;
+    text-overflow:ellipsis; white-space:nowrap; overflow:hidden;
   }
   .map-style-select:hover { color:var(--text); border-color:var(--muted); }
   /* Açılır seçenek listesi tarayıcının kendi penceresinde çiziliyor —
@@ -121,7 +122,7 @@
       padding:4px; gap:4px;
     }
     .mode-btn { width:30px; height:30px; font-size:14px; }
-    .map-style-select { height:30px; font-size:11px; max-width:88px; }
+    .map-style-select { height:30px; font-size:11px; width:110px; }
   }html:not([data-mode="light"]):not([data-mode="tactical"]) .main-content { flex:1; min-width:0; padding:30px 32px 90px; max-width:1180px; }#errBanner, #tamperBanner, #criticalOnLoadBanner { display:none; border-radius:var(--radius-sm); padding:14px 16px; font-size:12.5px; margin-bottom:16px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }#errBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.35); color:var(--danger); }#tamperBanner { background:var(--warning-soft); border:1px solid rgba(245,158,11,.35); color:var(--warning); }#criticalOnLoadBanner { background:var(--danger-soft); border:1px solid rgba(239,68,68,.4); color:var(--danger); font-weight:600; white-space:normal; }.stats-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:14px; margin-bottom:22px; }.stat-card {
     background: var(--surface);
     border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px;
@@ -1858,8 +1859,13 @@ function renderAllCasesMap(pairIds) {
       pts.push([st.tLoc.lat, st.tLoc.lon]);
     }
     if (st.pLoc && st.tLoc) {
-      const line = L.polyline([[st.pLoc.lat, st.pLoc.lon], [st.tLoc.lat, st.tLoc.lon]], { color: lineColor, weight: 2, dashArray: '5,5', opacity: .7 }).addTo(allCasesMapObj);
-      allCasesLayers.push(line);
+      // Açık/koyu, sade/karışık her harita stilinde net görünsün diye
+      // önce kalın yarı saydam siyah bir "hale" çiziyoruz, üstüne de daha
+      // kalın ve daha az saydam renkli kesikli çizgiyi ekliyoruz.
+      const linePts = [[st.pLoc.lat, st.pLoc.lon], [st.tLoc.lat, st.tLoc.lon]];
+      const lineHalo = L.polyline(linePts, { color: '#000000', weight: 6, opacity: .4, lineCap: 'round' }).addTo(allCasesMapObj);
+      const line = L.polyline(linePts, { color: lineColor, weight: 3.5, dashArray: '7,7', opacity: .95, lineCap: 'round' }).addTo(allCasesMapObj);
+      allCasesLayers.push(lineHalo, line);
     }
   });
   if (!allCasesMapFitted) {
