@@ -104,9 +104,13 @@
   .map-style-select {
     background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
     border-radius:var(--radius-sm); height:34px; padding:0 8px; font-size:12px; cursor:pointer;
-    max-width:120px;
+    max-width:130px; font-family:inherit;
   }
   .map-style-select:hover { color:var(--text); border-color:var(--muted); }
+  /* Açılır seçenek listesi tarayıcının kendi penceresinde çiziliyor —
+     tam tema kontrolü mümkün değil ama Chromium/Edge en azından bu
+     renkleri onaylıyor, böylece bembeyaz bir liste yerine temaya yakın durur. */
+  .map-style-select option { background:var(--surface-high); color:var(--text); }
   @media (max-width: 880px) {
     /* Sabit (fixed) konumda masaüstünde sorun yok ama mobilde üst
        istatistik kartlarının üstüne biniyordu — mobilde normal akışa
@@ -250,7 +254,7 @@ html[data-mode="light"] .sidebar {
     flex-shrink:0; position:sticky; top:0; z-index:40;
     display:flex; flex-direction:row; align-items:center; gap:18px;
     background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
-    border-bottom:1px solid var(--border); padding:12px 280px 12px 26px;
+    border-bottom:1px solid var(--border); padding:12px 175px 12px 26px;
   }
 html[data-mode="light"] .brand { display:flex; align-items:center; gap:11px; flex-shrink:0; }
 html[data-mode="light"] .logo {
@@ -954,14 +958,6 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
   <button class="mode-btn" data-set-mode="dark" title="Klasik (Koyu)" onclick="setUzakdurMode('dark')">🌑</button>
   <button class="mode-btn" data-set-mode="light" title="Komuta Merkezi (Açık)" onclick="setUzakdurMode('light')">☀️</button>
   <button class="mode-btn" data-set-mode="tactical" title="OPS//TAKİP (Taktik)" onclick="setUzakdurMode('tactical')">🎯</button>
-  <select id="mapStyleSelect" class="map-style-select" title="Harita görünümü" onchange="setMapStyle(this.value)">
-    <option value="auto">🗺️ Otomatik</option>
-    <option value="osm">🛣️ Sokak</option>
-    <option value="voyager">☀️ Açık Renkli</option>
-    <option value="dark">🌑 Koyu</option>
-    <option value="satellite">🛰️ Uydu</option>
-    <option value="terrain">⛰️ Arazi</option>
-  </select>
 </div>
 <aside class="sidebar">
   <div class="brand" title="UZAKDUR — Yönetici Paneli">
@@ -1032,7 +1028,17 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
     <div class="card ops-card-map" id="allCasesMapCard">
       <div class="row" style="justify-content:space-between; margin-bottom:6px;">
         <h2 style="margin:0;">🗺️ Tüm Vakalar Haritası</h2>
-        <button type="button" class="action-btn" id="allCasesMapFsBtn" onclick="toggleAllCasesMapFullscreen()" title="Tam ekran">⛶ Tam Ekran</button>
+        <div class="row" style="gap:8px;">
+          <select id="mapStyleSelect" class="map-style-select" title="Harita görünümü" onchange="setMapStyle(this.value)">
+            <option value="auto">🗺️ Otomatik</option>
+            <option value="osm">🛣️ Sokak</option>
+            <option value="voyager">☀️ Açık Renkli</option>
+            <option value="dark">🌑 Koyu</option>
+            <option value="satellite">🛰️ Uydu</option>
+            <option value="terrain">⛰️ Arazi</option>
+          </select>
+          <button type="button" class="action-btn" id="allCasesMapFsBtn" onclick="toggleAllCasesMapFullscreen()" title="Tam ekran">⛶ Tam Ekran</button>
+        </div>
       </div>
       <div id="allCasesMap"></div>
     </div>
@@ -1267,11 +1273,14 @@ function currentMapStyle() {
 function addTileLayer(map) {
   const style = currentMapStyle();
   const t = (style !== 'auto' && TILE_STYLES[style]) ? TILE_STYLES[style] : MODE_COLORS[currentMode()];
-  L.tileLayer(t.tileUrl, t.tileOpts).addTo(map);
+  if (map._uzakdurTileLayer) map.removeLayer(map._uzakdurTileLayer);
+  map._uzakdurTileLayer = L.tileLayer(t.tileUrl, t.tileOpts).addTo(map);
 }
 function setMapStyle(style) {
   try { localStorage.setItem('uzakdurMapStyle', style); } catch (e) {}
-  location.reload();
+  // Sayfayı yenilemek yerine zaten açık olan haritaların fayans katmanını
+  // yerinde değiştiriyoruz — işaretçiler/çizimler olduğu gibi kalır.
+  [allCasesMapObj, detailMapObj, zonePickerMapObj].forEach(m => { if (m) addTileLayer(m); });
 }
 function setUzakdurMode(mode) {
   try { localStorage.setItem('uzakdurMode', mode); } catch (e) {}
