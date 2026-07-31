@@ -762,7 +762,12 @@ html[data-mode="tactical"] .ops-card-map::before {
     animation: tacticalScan 7s linear infinite; z-index:2; pointer-events:none;
   }
 html[data-mode="tactical"] .ops-card-map > .row {
-    position:absolute; top:16px; left:50%; transform:translateX(-50%); z-index:3;
+    /* Leaflet'in kendi iç katmanları (fayans/işaretçi/popup panoları)
+       200-700 arası z-index kullanıyor ve #allCasesMap kendi başına yeni
+       bir stacking context açmadığı için bu değerler üst context'te bu
+       rozetle direkt yarışıyor — güvenle üstte kalması için çok yüksek
+       bir z-index veriyoruz. */
+    position:absolute; top:16px; left:50%; transform:translateX(-50%); z-index:1000;
     margin:0 !important; width:auto;
     background:rgba(17,24,39,.75); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
     border:1px solid var(--border); padding:9px 14px; border-radius:12px;
