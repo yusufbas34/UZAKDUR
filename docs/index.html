@@ -88,6 +88,10 @@
   /* Taktik modun Operasyon Panosu/Canlı Akış panellerini daraltan düğme —
      sadece taktik modda kullanılıyor, diğer modlarda panel zaten normal akışta. */
   .panel-collapse-btn { display:none; }
+  /* Taktik modun alt gezinme çubuğu — sidebar kapatılsa bile sekmelere
+     erişim kalsın diye her zaman görünür; diğer modlarda sidebar zaten
+     sabit bir sütun olduğu için gerek yok. */
+  .tactical-bottom-nav { display:none; }
   .mode-btn {
     background:var(--surface-hover); border:1px solid var(--border); color:var(--text2);
     border-radius:var(--radius-sm); width:34px; height:34px; padding:0; font-size:15px; box-shadow:none; cursor:pointer;
@@ -580,8 +584,18 @@ html[data-mode="tactical"] .brand-tag { display:block; font-size:11px; color:var
 html[data-mode="tactical"] h1 { font-family:var(--font-display); font-size:18px; letter-spacing:.3px; font-weight:700; margin:0; color:var(--text); }
 html[data-mode="tactical"] .subtitle { color:var(--text2); font-size:13.5px; margin: 6px 0 24px; display:flex; align-items:center; }
 html[data-mode="tactical"] .sidenav {
-    display:flex; flex-direction:column; gap:5px; flex:1; justify-content:flex-start; align-items:stretch;
-    background:transparent; padding:16px 14px; border-radius:0; max-width:none; margin:0; border:none;
+    /* Sekmeler artık her zaman görünen .tactical-bottom-nav'da — burada
+       tekrar etmesin diye sidebar'ın kendi navigasyonu gizleniyor. */
+    display:none;
+  }
+html[data-mode="tactical"] .tactical-bottom-nav {
+    display:flex; position:fixed; bottom:0; left:0; right:0; z-index:140;
+    gap:8px; padding:10px 18px; justify-content:center;
+    background: rgba(17,24,39,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top:1px solid var(--border);
+  }
+html[data-mode="tactical"] .tactical-bottom-nav .nav-item {
+    flex-direction:row; width:auto; flex:0 1 220px; justify-content:center;
   }
 html[data-mode="tactical"] .nav-item {
     display:flex; align-items:center; justify-content:flex-start; width:100%; height:auto;
@@ -965,6 +979,11 @@ html[data-mode="tactical"] .pair-line { font-size:14px; flex-wrap:wrap; }}
   </div>
 </aside>
 <button type="button" class="tactical-sidebar-toggle" id="tacticalSidebarToggle" title="Yönetim panelini aç/kapat" onclick="toggleTacticalSidebar()">☰</button>
+<nav class="tactical-bottom-nav">
+  <button class="nav-item" id="mainTabBottom_ops" title="Operasyon" onclick="showMainTab('ops')"><span class="nav-icon">🎯</span><span class="nav-label">Operasyon</span></button>
+  <button class="nav-item" id="mainTabBottom_devices" title="Cihazlar &amp; Eşleşmeler" onclick="showMainTab('devices')"><span class="nav-icon">📱</span><span class="nav-label">Cihazlar &amp; Eşleşmeler</span></button>
+  <button class="nav-item" id="mainTabBottom_requests" title="Talepler" onclick="showMainTab('requests')"><span class="nav-icon">📋</span><span class="nav-label">Talepler</span><span class="req-dot hidden" id="requestsDotBottom">0</span></button>
+</nav>
 
 <main class="main-content">
 <div id="dashboardView">
@@ -1589,6 +1608,7 @@ function showMainTab(name) {
   MAIN_TABS.forEach(t => {
     document.getElementById(`tabPanel_${t}`).classList.toggle('hidden', t !== name);
     document.getElementById(`mainTab_${t}`).classList.toggle('active', t === name);
+    document.getElementById(`mainTabBottom_${t}`)?.classList.toggle('active', t === name);
   });
   localStorage.setItem('uzakdur_admin_tab', name);
   // Harita, gizliyken oluşturulmuşsa Leaflet boyutu yanlış hesaplayabilir;
@@ -1600,9 +1620,11 @@ function updateRequestsDot() {
   const resetCount = Object.keys(devices).filter(id => devices[id].passwordResetRequest).length;
   const contactCount = Object.keys(devices).reduce((sum, id) => sum + Object.keys(deviceContactRequests(id)).length, 0);
   const total = resetCount + contactCount;
-  const dot = document.getElementById('requestsDot');
-  dot.textContent = total;
-  dot.classList.toggle('hidden', total === 0);
+  [document.getElementById('requestsDot'), document.getElementById('requestsDotBottom')].forEach(dot => {
+    if (!dot) return;
+    dot.textContent = total;
+    dot.classList.toggle('hidden', total === 0);
+  });
 }
 
 let liveFeedTab = null;
