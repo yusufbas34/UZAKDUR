@@ -1811,7 +1811,10 @@ function renderAllCasesMap(pairIds) {
     return;
   }
   if (!allCasesMapObj) {
-    allCasesMapObj = L.map('allCasesMap', { zoomControl: true, attributionControl: false });
+    // Zoom kontrolü varsayılan olarak sol üstte, aynı köşede yüzen
+    // Operasyon Panosu paneliyle çakışıyordu — sol alta taşıyoruz.
+    allCasesMapObj = L.map('allCasesMap', { zoomControl: false, attributionControl: false });
+    L.control.zoom({ position: 'bottomleft' }).addTo(allCasesMapObj);
     addTileLayer(allCasesMapObj);
     setTimeout(() => allCasesMapObj.invalidateSize(), 50);
   }
@@ -2411,7 +2414,8 @@ function openDetail(pairId) {
   try {
     if (typeof L === 'undefined') throw new Error('Harita kütüphanesi (Leaflet) yüklenemedi — ağın unpkg.com adresine erişimi engelliyor olabilir.');
     if (!detailMapObj) {
-      detailMapObj = L.map('detailMap', { zoomControl: true, attributionControl: false });
+      detailMapObj = L.map('detailMap', { zoomControl: false, attributionControl: false });
+      L.control.zoom({ position: 'bottomleft' }).addTo(detailMapObj);
       addTileLayer(detailMapObj);
     }
     setTimeout(() => detailMapObj.invalidateSize(), 50);
@@ -2484,7 +2488,8 @@ function openZonePicker() {
   try {
     if (typeof L === 'undefined') throw new Error('Harita kütüphanesi (Leaflet) yüklenemedi — ağın unpkg.com adresine erişimi engelliyor olabilir.');
     if (!zonePickerMapObj) {
-      zonePickerMapObj = L.map('zonePickerMap', { zoomControl: true, attributionControl: false });
+      zonePickerMapObj = L.map('zonePickerMap', { zoomControl: false, attributionControl: false });
+      L.control.zoom({ position: 'bottomleft' }).addTo(zonePickerMapObj);
       addTileLayer(zonePickerMapObj);
       zonePickerMapObj.on('click', (e) => {
         if (zonePickerMode === 'route') {
