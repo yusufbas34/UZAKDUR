@@ -57,10 +57,36 @@ jobs:
           name: uzakdur-apk
           path: build/app/outputs/flutter-apk/app-phone-release.apk
           retention-days: 30
+      # Wear OS (saat) APK'sı — henüz gerçek bir saatte hiç denenmedi, bu
+      # yüzden burada başarısız olsa bile (continue-on-error) asıl telefon
+      # yayınını ASLA engellememeli.
+      - name: Wear (saat) APK'sını derle
+        id: wear_build
+        continue-on-error: true
+        run: flutter build apk --release --flavor wear -t lib/main_wear.dart --dart-define=APP_BUILD_NUMBER=${{ github.run_number }}
+        env:
+          UZAKDUR_KEYSTORE_PASSWORD: ${{ secrets.UZAKDUR_KEYSTORE_PASSWORD }}
+          UZAKDUR_KEY_ALIAS: ${{ secrets.UZAKDUR_KEY_ALIAS }}
+          UZAKDUR_KEY_PASSWORD: ${{ secrets.UZAKDUR_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        if: steps.wear_build.outcome == 'success'
+        with:
+          name: uzakdur-wear-apk
+          path: build/app/outputs/flutter-apk/app-wear-release.apk
+          retention-days: 30
+          if-no-files-found: ignore
       # main'e her push'ta, sabit ve süresi dolmayan bir indirme linki (Actions
       # artifact'larının aksine 30 günde silinmiyor, kimlik doğrulama
-      # gerektirmiyor) için bir GitHub Release oluşturulup APK'ya eklenir.
+      # gerektirmiyor) için bir GitHub Release oluşturulup APK'lara eklenir.
       # Uygulama da açılışta bunu kontrol edip güncelleme olduğunda haber verir.
+      - name: Yayın dosyalarını hazırla
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p release-assets
+          cp build/app/outputs/flutter-apk/app-phone-release.apk release-assets/
+          if [ -f build/app/outputs/flutter-apk/app-wear-release.apk ]; then
+            cp build/app/outputs/flutter-apk/app-wear-release.apk release-assets/
+          fi
       - name: Yayın oluştur (main için)
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
@@ -68,4 +94,4 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: UZAKDUR build ${{ github.run_number }}
           make_latest: true
-          files: build/app/outputs/flutter-apk/app-phone-release.apk
+          files: release-assets/*
