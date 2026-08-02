@@ -46,6 +46,26 @@ android {
         multiDexEnabled true
     }
 
+    // "wear" flavor'ı, telefon uygulamasıyla AYNI applicationId'i kullanır
+    // (google-services.json bu applicationId'ye kayıtlı — farklı bir id
+    // ("com.uzakdur.app.wear" gibi) google-services eklentisinin build'i
+    // "No matching client found" hatasıyla durdurmasına yol açar). Aynı
+    // applicationId'nin sorun olmaması: iki APK zaten iki ayrı FİZİKSEL
+    // cihaza (telefon / saat) kuruluyor, aynı cihaza ikisi birden asla
+    // kurulmuyor. Hangi Dart giriş noktasının kullanılacağı build komutunda
+    // belirlenir: `flutter build apk --flavor wear -t lib/main_wear.dart`
+    // (bkz. android/README_WEAR.md).
+    flavorDimensions "variant"
+    productFlavors {
+        phone {
+            dimension "variant"
+        }
+        wear {
+            dimension "variant"
+            versionNameSuffix "-wear"
+        }
+    }
+
     signingConfigs {
         if (hasReleaseSigning) {
             release {

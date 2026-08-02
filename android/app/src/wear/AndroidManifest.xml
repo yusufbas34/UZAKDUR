@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Bu cihazın bir Wear OS saati olduğunu bildirir; Play Store'da (ve
+         bazı ROM'larda) telefonlara kurulmasını engeller. -->
+    <uses-feature android:name="android.hardware.type.watch" android:required="true"/>
+
+    <application>
+        <!-- "standalone" = true: bu uygulamanın çalışması için telefonda
+             eşleştirilmiş bir companion app GEREKMEZ — saat kendi
+             GPS+internet bağlantısıyla (Wi-Fi ya da eSIM/LTE) tek başına
+             çalışır. Bu olmadan bazı Wear OS sürümleri uygulamayı yalnızca
+             telefon Bluetooth menzilindeyken göstermeye çalışır. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true"/>
+    </application>
+
+</manifest>
